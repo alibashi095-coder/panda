@@ -1,0 +1,24 @@
+{
+  "name": "نظام إدارة مركز الباندا",
+  "short_name": "مركز الباندا",
+  "description": "بوابة الإدارة الشاملة لمركز الباندا التعليمي",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4f7f6",
+  "theme_color": "#6366f1",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

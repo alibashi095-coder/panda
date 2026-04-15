@@ -1,3 +1,8 @@
+// ============================================================
+//  نظام إدارة مركز الباندا - النسخة النهائية
+//  المطور: Antigravity
+// ============================================================
+
 // === Sidebar Toggle ===
 const sidebar = document.querySelector(".sidebar");
 const toggleBtn = document.querySelector("#toggle-btn");
@@ -5,6 +10,50 @@ const toggleBtn = document.querySelector("#toggle-btn");
 toggleBtn.addEventListener("click", () => {
     sidebar.classList.toggle("close");
 });
+
+// === Mobile Sidebar Default & Overlay ===
+const mobileToggleBtn = document.getElementById("mobile-toggle-btn");
+if (mobileToggleBtn) {
+    mobileToggleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        sidebar.classList.toggle("close");
+    });
+}
+if (window.innerWidth <= 768) {
+    sidebar.classList.add("close");
+}
+document.querySelector('.main-content').addEventListener('click', (e) => {
+    if (window.innerWidth <= 768 && !sidebar.classList.contains("close") && !e.target.closest('#mobile-toggle-btn')) {
+        sidebar.classList.add("close");
+    }
+});
+
+// إظهار القائمة الجانبية عند الضغط على "المزيد" من شريط التطبيق السفلي
+const bottomMenuBtn = document.getElementById("bottom-menu-btn");
+if (bottomMenuBtn) {
+    bottomMenuBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        sidebar.classList.toggle("close");
+    });
+}
+
+// === Mobile Swipe to Close Sidebar ===
+let touchStartX = 0;
+let touchEndX = 0;
+const sidebarElement = document.getElementById('sidebar');
+if (sidebarElement) {
+    sidebarElement.addEventListener('touchstart', e => {
+        touchStartX = e.changedTouches[0].screenX;
+    }, {passive: true});
+    sidebarElement.addEventListener('touchend', e => {
+        touchEndX = e.changedTouches[0].screenX;
+        if (window.innerWidth <= 768) {
+            if (touchEndX - touchStartX > 50) {
+                if (!sidebar.classList.contains('close')) sidebar.classList.add('close');
+            }
+        }
+    }, {passive: true});
+}
 
 // === Dark Mode Toggle ===
 const themeToggle = document.getElementById("theme-toggle");
@@ -36,6 +85,62 @@ if (savedTheme === "dark") {
 const navLinks = document.querySelectorAll(".nav-links a");
 const pageViews = document.querySelectorAll(".page-view");
 
+// === Register Service Worker for PWA ===
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then(registration => {
+            console.log('PWA ServiceWorker registered successfuly.');
+        }).catch(err => {
+            console.error('ServiceWorker registration failed: ', err);
+        });
+    });
+}
+
+// === PWA Install App Logic ===
+let deferredPrompt;
+const installContainer = document.getElementById('installAppContainer');
+const installBtn = document.getElementById('installAppBtn');
+const topbarInstallBtn = document.getElementById('topbarInstallBtn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    // منع المتصفح من إظهار شريط التثبيت التلقائي أسفل الشاشة
+    e.preventDefault();
+    // حفظ الحدث لاستدعائه عند نقر المستخدم على الزر
+    deferredPrompt = e;
+    // إظهار زر التثبيت الخاص بنا
+    if (installContainer) installContainer.style.display = 'block';
+    if (topbarInstallBtn) topbarInstallBtn.style.display = 'flex';
+});
+
+if (installBtn) {
+    installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        // إظهار نافذة التثبيت الأصلية الخاصة بالمتصفح/الهاتف
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        // إخفاء الزر بعد الاختيار
+        if (installContainer) installContainer.style.display = 'none';
+            if (topbarInstallBtn) topbarInstallBtn.style.display = 'none';
+    });
+}
+
+if (topbarInstallBtn) {
+    topbarInstallBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        if (installContainer) installContainer.style.display = 'none';
+        if (topbarInstallBtn) topbarInstallBtn.style.display = 'none';
+    });
+}
+
+window.addEventListener('appinstalled', () => {
+    if (installContainer) installContainer.style.display = 'none';
+    if (topbarInstallBtn) topbarInstallBtn.style.display = 'none';
+});
+
 // === Initialization & Login Logic ===
 let currentUser = null;
 
@@ -48,40 +153,60 @@ document.addEventListener("DOMContentLoaded", () => {
             const emailInput = document.getElementById("loginEmail").value.trim();
             const passwordInput = document.getElementById("loginPassword").value.trim();
 
-            console.log("Login attempt:", { email: emailInput, password: passwordInput });
-            console.log("Current rolesData length:", rolesData.length);
-            console.log("Current rolesData contents:", rolesData);
-
-            // Check against rolesData
-            let userMatch = rolesData.find(r =>
-                (r.email === emailInput || r.name === emailInput || r.roleCode === emailInput) && r.password === passwordInput
-            );
-
-
-            const errorMsg = document.getElementById("loginError");
-            if (userMatch) {
-                errorMsg.classList.remove("show");
-                currentUser = userMatch;
-                sessionStorage.setItem("currentUser", JSON.stringify(currentUser));
-                handleSuccessfulLogin(currentUser, true);
-            } else {
-                errorMsg.classList.add("show");
-                // Remove animation to re-trigger if needed
-                setTimeout(() => errorMsg.classList.remove("show"), 500);
-                setTimeout(() => errorMsg.classList.add("show"), 510);
-            }
+            loginToServer(emailInput, passwordInput);
         });
     }
 
-    // Load data silently so we can validate logins
-    loadDataFromDB().then(() => {
-        const savedSession = sessionStorage.getItem("currentUser");
-        if (savedSession) {
-            currentUser = JSON.parse(savedSession);
-            handleSuccessfulLogin(currentUser, false);
-        }
-    });
+    // Restore session (no need to download all users/passwords)
+    const savedSession = sessionStorage.getItem("currentUser");
+    if (savedSession) {
+        currentUser = JSON.parse(savedSession);
+        handleSuccessfulLogin(currentUser, false);
+    }
 });
+
+async function loginToServer(identifier, password) {
+    const errorMsg = document.getElementById("loginError");
+    const submitBtn = document.querySelector("#loginForm button");
+    const originalBtnHTML = submitBtn ? submitBtn.innerHTML : "دخول النظام <i class='bx bx-left-arrow-alt' style='margin-right: 8px; font-size: 20px;'></i>";
+    
+    try {
+        if (submitBtn) {
+            submitBtn.innerHTML = "<i class='bx bx-loader bx-spin'></i> جاري التحقق...";
+            submitBtn.disabled = true;
+        }
+
+        const response = await fetch('api.php?endpoint=login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email: identifier, password: password })
+        });
+        
+        const result = await response.json();
+
+        if (!result.success || !result.data || !result.data.user) {
+            throw new Error(result.message || "المستخدم غير موجود أو بيانات الدخول خاطئة.");
+        }
+        
+        if (errorMsg) errorMsg.classList.remove("show");
+        
+        currentUser = result.data.user;
+        
+        sessionStorage.setItem("currentUser", JSON.stringify(currentUser));
+        handleSuccessfulLogin(currentUser, true);
+        if (submitBtn) { submitBtn.innerHTML = originalBtnHTML; submitBtn.disabled = false; }
+    } catch (e) {
+        console.error("Login error:", e);
+        if (errorMsg) {
+            errorMsg.textContent = "فشل تسجيل الدخول: " + e.message;
+            errorMsg.classList.add("show");
+            setTimeout(() => errorMsg.classList.remove("show"), 3000);
+        }
+        if (submitBtn) { submitBtn.innerHTML = originalBtnHTML; submitBtn.disabled = false; }
+    }
+}
 
 function handleSuccessfulLogin(user, animate) {
     try {
@@ -102,8 +227,14 @@ function handleSuccessfulLogin(user, animate) {
         // Update Profile UI
         const profileName = document.querySelector(".profile_name");
         const profileJob = document.querySelector(".job");
+        const profileImg = document.getElementById("sidebar-profile-img");
+        
         if (profileName) profileName.textContent = user.name;
         if (profileJob) profileJob.textContent = user.role;
+        if (profileImg) profileImg.src = user.img || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=4F46E5&color=fff`;
+
+        const topbarUserInfo = document.getElementById("topbar-user-info");
+        if (topbarUserInfo) topbarUserInfo.style.display = 'none';
 
         // Filter sidebar based on Role
         document.querySelectorAll('.nav-links > li').forEach(li => {
@@ -113,7 +244,7 @@ function handleSuccessfulLogin(user, animate) {
         let defaultRoute = 'dashboard';
 
         if (user.roleCode === 'admin') {
-            const adminViews = ['dashboard', 'students', 'instructors', 'courses', 'class-management', 'subjects', 'accounting', 'notifications', 'settings', 'roles'];
+            const adminViews = ['dashboard', 'students', 'instructors', 'courses', 'class-management', 'subjects', 'accounting', 'notifications', 'settings', 'roles', 'certificates', 'schedule', 'library'];
             document.querySelectorAll('.nav-links > li').forEach(li => {
                 const target = li.querySelector('a')?.getAttribute('data-target');
                 if (adminViews.includes(target)) li.style.display = 'block';
@@ -121,7 +252,7 @@ function handleSuccessfulLogin(user, animate) {
             defaultRoute = 'dashboard';
         }
         else if (user.roleCode === 'teacher') {
-            const teacherViews = ['teacher-dashboard', 'teacher-students', 'teacher-attendance', 'teacher-notifications'];
+            const teacherViews = ['teacher-dashboard', 'teacher-students', 'teacher-attendance', 'teacher-grades', 'teacher-notifications', 'teacher-settings'];
             document.querySelectorAll('.nav-links > li').forEach(li => {
                 const target = li.querySelector('a')?.getAttribute('data-target');
                 if (teacherViews.includes(target)) li.style.display = 'block';
@@ -129,7 +260,7 @@ function handleSuccessfulLogin(user, animate) {
             defaultRoute = 'teacher-dashboard';
         }
         else if (user.roleCode === 'parent') {
-            const parentViews = ['parent-dashboard', 'parent-children', 'parent-fees'];
+            const parentViews = ['parent-dashboard', 'parent-children', 'parent-fees', 'parent-settings'];
             document.querySelectorAll('.nav-links > li').forEach(li => {
                 const target = li.querySelector('a')?.getAttribute('data-target');
                 if (parentViews.includes(target)) li.style.display = 'block';
@@ -146,9 +277,59 @@ function handleSuccessfulLogin(user, animate) {
         }
 
         console.log("Navigating to default route:", defaultRoute);
+        
+        // تخصيص شريط التطبيق السفلي بناءً على صلاحية المستخدم
+        const bottomNav = document.getElementById("mobile-bottom-nav");
+        if (bottomNav) {
+            if (user.roleCode === 'admin') {
+                bottomNav.innerHTML = `
+                    <a href="#" class="nav-item active" data-target="dashboard"><i class='bx bx-grid-alt'></i><span>الرئيسية</span></a>
+                    <a href="#" class="nav-item" data-target="students"><i class='bx bx-user'></i><span>الطلاب</span></a>
+                    <a href="#" class="nav-item" data-target="accounting"><i class='bx bx-wallet'></i><span>المالية</span></a>
+                    <a href="#" class="nav-item" id="bottom-menu-btn"><i class='bx bx-menu'></i><span>المزيد</span></a>`;
+            } else if (user.roleCode === 'teacher') {
+                bottomNav.innerHTML = `
+                    <a href="#" class="nav-item active" data-target="teacher-dashboard"><i class='bx bx-grid-alt'></i><span>الرئيسية</span></a>
+                    <a href="#" class="nav-item" data-target="teacher-students"><i class='bx bx-group'></i><span>طلابي</span></a>
+                    <a href="#" class="nav-item" data-target="teacher-attendance"><i class='bx bx-calendar-check'></i><span>التحضير</span></a>
+                    <a href="#" class="nav-item" id="bottom-menu-btn"><i class='bx bx-menu'></i><span>المزيد</span></a>`;
+            } else if (user.roleCode === 'parent') {
+                 bottomNav.innerHTML = `
+                    <a href="#" class="nav-item active" data-target="parent-dashboard"><i class='bx bx-grid-alt'></i><span>الرئيسية</span></a>
+                    <a href="#" class="nav-item" data-target="parent-children"><i class='bx bx-face'></i><span>أبنائي</span></a>
+                    <a href="#" class="nav-item" data-target="parent-fees"><i class='bx bx-wallet'></i><span>الرسوم</span></a>
+                    <a href="#" class="nav-item" id="bottom-menu-btn"><i class='bx bx-menu'></i><span>المزيد</span></a>`;
+            } else if (user.roleCode === 'accountant') {
+                bottomNav.innerHTML = `
+                    <a href="#" class="nav-item active" data-target="accountant-dashboard"><i class='bx bx-grid-alt'></i><span>الرئيسية</span></a>
+                    <a href="#" class="nav-item" data-target="accountant-fees"><i class='bx bx-wallet'></i><span>الرسوم</span></a>
+                    <a href="#" class="nav-item" data-target="accountant-reports"><i class='bx bx-line-chart'></i><span>التقارير</span></a>
+                    <a href="#" class="nav-item" id="bottom-menu-btn"><i class='bx bx-menu'></i><span>المزيد</span></a>`;
+            }
+            
+            // إعادة ربط حدث زر "المزيد"
+            document.getElementById("bottom-menu-btn")?.addEventListener("click", (e) => {
+                e.preventDefault();
+                if (navigator.vibrate) navigator.vibrate(50); // اهتزاز خفيف
+                sidebar.classList.toggle("close");
+            });
+            
+            // برمجة التنقل عند الضغط على أيقونات الشريط السفلي
+            document.querySelectorAll(".mobile-bottom-nav a[data-target]").forEach(link => {
+                link.addEventListener("click", (e) => {
+                    e.preventDefault();
+                    if (navigator.vibrate) navigator.vibrate(50);
+                    navigateTo(link.getAttribute("data-target"));
+                });
+            });
+        }
+
         // Default route
         navigateTo(defaultRoute);
         
+        // Load data after authentication
+        loadDataFromDB();
+
         // تحديث الإشعارات فور تسجيل الدخول لتتناسب مع الصلاحية
         renderNotifications();
         renderTeacherViews();
@@ -177,6 +358,11 @@ function navigateTo(targetId) {
     const activeLink = document.querySelector(`.nav-links a[data-target="${targetId}"]`);
     if (activeLink) activeLink.classList.add("active");
 
+    // تحديث اللون للأيقونة النشطة في شريط التطبيق السفلي
+    document.querySelectorAll(".mobile-bottom-nav a.active").forEach(l => l.classList.remove("active"));
+    const bottomActiveLink = document.querySelector(`.mobile-bottom-nav a[data-target="${targetId}"]`);
+    if (bottomActiveLink) bottomActiveLink.classList.add("active");
+
     // Show target section, hide others
     pageViews.forEach(view => {
         if (view.id === targetId) {
@@ -190,6 +376,15 @@ function navigateTo(targetId) {
     if (window.innerWidth <= 768) {
         sidebar.classList.add("close");
     }
+}
+
+function navigateToHome() {
+    if (!currentUser) return;
+    let defaultRoute = 'dashboard';
+    if (currentUser.roleCode === 'teacher') defaultRoute = 'teacher-dashboard';
+    else if (currentUser.roleCode === 'parent') defaultRoute = 'parent-dashboard';
+    else if (currentUser.roleCode === 'accountant') defaultRoute = 'accountant-dashboard';
+    navigateTo(defaultRoute);
 }
 
 navLinks.forEach(link => {
@@ -484,7 +679,8 @@ function populateSelectMenus(modalId) {
         }
         const studentSelect = document.getElementById('newRoleStudent');
         if (studentSelect) {
-            studentSelect.innerHTML = studentsData.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('');
+            const limited = studentsData.slice(0, 100);
+            studentSelect.innerHTML = limited.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('') + `<option disabled>... قم بالبحث لعرض المزيد</option>`;
         }
     } else if (modalId === 'edit-role-modal') {
         const subjectSelect = document.getElementById('editRoleSubject');
@@ -497,7 +693,8 @@ function populateSelectMenus(modalId) {
         }
         const studentSelect = document.getElementById('editRoleStudent');
         if (studentSelect) {
-            studentSelect.innerHTML = studentsData.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('');
+            const limited = studentsData.slice(0, 100);
+            studentSelect.innerHTML = limited.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('') + `<option disabled>... قم بالبحث لعرض المزيد</option>`;
         }
     } else if (modalId === 'add-instructor-modal') {
         const subjectSelect = document.getElementById('instructorSubject');
@@ -511,31 +708,97 @@ function populateSelectMenus(modalId) {
         }
         const instSelect = document.getElementById('courseInstructor');
         if (instSelect) {
-            instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+            instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
         }
     } else if (modalId === 'add-class-modal') {
         const subjectSelect = document.getElementById('classSubject');
         if (subjectSelect) {
             subjectSelect.innerHTML = `<option value="">-- حدد المادة --</option>` + subjectsData.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
         }
+        const instSelect = document.getElementById('classInstructor');
+        if (instSelect) {
+            instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        }
+    } else if (modalId === 'add-schedule-modal') {
+        const courseSelect = document.getElementById('scheduleCourse');
+        if (courseSelect) {
+            courseSelect.innerHTML = `<option value="">-- اختر الدورة --</option>` + trainingCourses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        }
+        const classSelect = document.getElementById('scheduleClass');
+        if (classSelect) {
+            classSelect.innerHTML = `<option value="">-- حدد الدورة أولاً --</option>`;
+        }
+        const instructorSelect = document.getElementById('scheduleInstructor');
+        if (instructorSelect) {
+            instructorSelect.innerHTML = `<option value="">-- اختر المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        }
+    } else if (modalId === 'add-grade-modal') {
+        const classSelect = document.getElementById('gradeModalClass');
+        const studentSelect = document.getElementById('gradeModalStudent');
+        if (classSelect) {
+            let availableClasses = coursesData.filter(c => c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'));
+            if (currentUser && currentUser.roleCode === 'teacher') {
+                availableClasses = availableClasses.filter(c => c.instructor === currentUser.name);
+            }
+            classSelect.innerHTML = '<option value="">-- اختر الشعبة --</option>' + availableClasses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        }
+        if (studentSelect) {
+            studentSelect.innerHTML = '<option value="">-- حدد الشعبة أولاً --</option>';
+        }
     }
 }
 
-function filterInstructorsForCourse() {
-    const selectedSub = document.getElementById('courseSubject')?.value;
+function populateInstructorsForCourse() {
     const instSelect = document.getElementById('courseInstructor');
-    if (!instSelect) return;
+    if (instSelect) {
+        const currentVal = instSelect.value;
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        if (currentVal) instSelect.value = currentVal;
+    }
+}
 
-    if (!selectedSub) {
-        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+function populateInstructorsForEditCourse() {
+    const instSelect = document.getElementById('editCourseInstructor');
+    if (instSelect) {
+        const currentVal = instSelect.value;
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        if (currentVal) instSelect.value = currentVal;
+    }
+}
+
+function populateInstructorsForClass() {
+    const instSelect = document.getElementById('classInstructor');
+    if (instSelect) {
+        const currentVal = instSelect.value;
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        if (currentVal) instSelect.value = currentVal;
+    }
+}
+
+function populateInstructorsForEditClass() {
+    const instSelect = document.getElementById('editClassInstructor');
+    if (instSelect) {
+        const currentVal = instSelect.value;
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        if (currentVal) instSelect.value = currentVal;
+    }
+}
+
+function filterStudentsForGradeModal() {
+    const classId = document.getElementById('gradeModalClass').value;
+    const studentSelect = document.getElementById('gradeModalStudent');
+    if (!studentSelect) return;
+    
+    if (!classId) {
+        studentSelect.innerHTML = '<option value="">-- حدد الشعبة أولاً --</option>';
         return;
     }
-
-    const filteredInsts = instructorsData.filter(i => i.spec === selectedSub);
-    if (filteredInsts.length > 0) {
-        instSelect.innerHTML = filteredInsts.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+    
+    const classStudents = studentsData.filter(s => s.class_id === classId);
+    if (classStudents.length > 0) {
+        studentSelect.innerHTML = '<option value="">-- اختر الطالب --</option>' + classStudents.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
     } else {
-        instSelect.innerHTML = `<option value="">-- لا يوجد مدرس لهذه المادة --</option>`;
+        studentSelect.innerHTML = '<option value="">-- لا يوجد طلاب في هذه الشعبة --</option>';
     }
 }
 
@@ -570,8 +833,8 @@ function initChart() {
             datasets: [{
                 label: 'إحصائيات التحاق الطلاب',
                 data: [], // Will be populated dynamically
-                backgroundColor: 'rgba(79, 70, 229, 0.8)',
-                borderColor: 'rgba(79, 70, 229, 1)',
+                backgroundColor: 'rgba(99, 102, 241, 0.7)', /* Modern Indigo */
+                borderColor: 'rgba(99, 102, 241, 1)',
                 borderWidth: 1,
                 borderRadius: 4
             }]
@@ -665,7 +928,7 @@ function updateEnrollmentChart() {
     enrollmentChart.update();
 }
 
-const API_BASE = "/api";
+const API_BASE = "api.php?endpoint="; // توجيه مباشر إلى ملف PHP
 
 // Global UI Data Arrays
 let studentsData = [];
@@ -679,25 +942,33 @@ let usersData = [];
 let notificationsData = [];
 let settingsData = {};
 let attendanceData = [];
+let scheduleData = [];
+let gradesData = [];
+let libraryData = [];
+let lastSeenNotificationId = null;
 
 // === Backend Data Communication ===
+
 async function loadDataFromDB() {
     try {
-        const response = await fetch(`${API_BASE}/data`);
-        if (response.ok) {
-            const db = await response.json();
+        const response = await fetch('api.php?endpoint=data');
+        const result = await response.json();
 
-            studentsData = db.students || [];
-            rolesData = db.roles || db.users || [];
-            recentStudentsData = db.recentStudents || [];
-            instructorsData = db.instructors || [];
-            coursesData = db.courses || [];
-            subjectsData = db.subjects || [];
-            accountingData = db.accounting || [];
-            usersData = db.users || [];
-            notificationsData = db.notifications || [];
-            settingsData = db.settings || {};
-            attendanceData = db.attendance || [];
+        if (result.success && result.data) {
+            studentsData = result.data.students || [];
+            instructorsData = result.data.instructors || [];
+            coursesData = result.data.courses || [];
+            subjectsData = result.data.subjects || [];
+            accountingData = result.data.accounting || [];
+            notificationsData = result.data.notifications || [];
+            settingsData = result.data.settings || {};
+            recentStudentsData = result.data.recentStudents || [];
+            rolesData = result.data.roles || [];
+            usersData = result.data.roles || [];
+            attendanceData = result.data.attendance || [];
+            scheduleData = result.data.schedule || [];
+            gradesData = result.data.grades || [];
+            libraryData = result.data.library || [];
 
             renderStudents();
             renderRoles();
@@ -715,14 +986,83 @@ async function loadDataFromDB() {
             updateSubscriptionCards();
             renderTeacherViews();
             renderParentViews();
+            renderSchedule();
+            renderLibrary();
         } else {
-            console.error("Failed to fetch data, server returned " + response.status);
-            alert("تنبيه: لا يمكن جلب البيانات من الخادم، يرجى التأكد من تشغيل (python app.py).");
+            console.error("Error loading data:", result.message);
         }
+
     } catch (e) {
-        console.error("Network or parsing error:", e);
-        alert("تنبيه: لا يمكن الاتصال بقاعدة البيانات. تأكد من أن تطبيق Flask يعمل على الرابط الصحيح وعدم فتح الملف مباشرة كـ file://.");
+        console.error("Error fetching data from API:", e);
     }
+}
+
+// === استخراج اسم ولي الأمر وتوليد البريد وكلمة المرور تلقائياً ===
+const iraqiNamesDB = {
+    "محمد": "mohammed", "علي": "ali", "حسين": "hussein", "حسن": "hassan",
+    "عباس": "abbas", "احمد": "ahmed", "أحمد": "ahmed", "محمود": "mahmoud",
+    "كاظم": "kadhim", "جاسم": "jassim", "صادق": "sadiq", "باقر": "baqir",
+    "جواد": "jawad", "عبد": "abdul", "الله": "allah", "رضا": "ridha",
+    "كرار": "karrar", "منتظر": "muntadher", "سجاد": "sajjad", "مصطفى": "mustafa",
+    "زيد": "zaid", "ياسر": "yasser", "عمار": "ammar", "مهدي": "mahdi",
+    "ابراهيم": "ibrahim", "إبراهيم": "ibrahim", "خليل": "khalil", "اسماعيل": "ismail",
+    "عمر": "omar", "ابو": "abu", "بكر": "bakr", "عثمان": "othman",
+    "عزيز": "aziz", "رحيم": "raheem", "كريم": "kareem", "يوسف": "youssef",
+    "قاسم": "qasim", "طارق": "tariq", "رائد": "raed", "وليد": "waleed",
+    "سعد": "saad", "سعيد": "saeed", "مجيد": "majeed", "حميد": "hameed",
+    "حامد": "hamed", "خالد": "khalid", "بهاء": "bahaa", "علاء": "alaa"
+};
+
+function getEnglishName(arabicName) {
+    if (!arabicName) return "parent";
+    const parts = arabicName.trim().split(/\s+/);
+    let firstPart = parts[0].replace(/[\u064B-\u065F\u0640]/g, ''); // إزالة الحركات
+    if (iraqiNamesDB[firstPart]) return iraqiNamesDB[firstPart];
+    const fallbackMap = { 'ا':'a','أ':'a','إ':'e','آ':'a','ب':'b','ت':'t','ث':'th','ج':'j','ح':'h','خ':'kh','د':'d','ذ':'dh','ر':'r','ز':'z','س':'s','ش':'sh','ص':'s','ض':'dh','ط':'t','ظ':'dh','ع':'a','غ':'gh','ف':'f','ق':'q','ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'y','ى':'a','ة':'a' };
+    let eng = '';
+    for (let char of firstPart) { eng += fallbackMap[char] || ''; }
+    return eng || "parent";
+}
+
+const studentFullNameInput = document.getElementById('studentFullName');
+const studentParentNameInput = document.getElementById('studentParentName');
+const studentEmailPrefixInput = document.getElementById('studentEmailPrefix');
+const studentParentPasswordInput = document.getElementById('studentParentPassword');
+
+function generateParentCredentials(parentNameAr) {
+    if (studentEmailPrefixInput) {
+        let enName = getEnglishName(parentNameAr);
+        // وضع الاسم المترجم في الإيميل (مع الاحتفاظ بالرقم العشوائي لعدم تغييره كل حرف)
+        if (studentEmailPrefixInput.value.trim() === '' || studentEmailPrefixInput.value.includes('_')) {
+             let currentNum = studentEmailPrefixInput.value.split('_')[1];
+             let randNum = currentNum && currentNum.length === 3 ? currentNum : Math.floor(100 + Math.random() * 900);
+             studentEmailPrefixInput.value = enName + '_' + randNum;
+        }
+    }
+    if (studentParentPasswordInput && studentParentPasswordInput.value.trim() === '') {
+        // تعيين كلمة المرور الافتراضية الثابتة
+        studentParentPasswordInput.value = '123';
+    }
+}
+
+if (studentFullNameInput && studentParentNameInput) {
+    studentFullNameInput.addEventListener('input', function() {
+        const parts = this.value.trim().split(/\s+/);
+        if (parts.length > 1) {
+                const pName = parts.slice(1).join(' ');
+                studentParentNameInput.value = pName;
+                generateParentCredentials(pName);
+        } else {
+            studentParentNameInput.value = '';
+                if (studentEmailPrefixInput && studentEmailPrefixInput.value.includes('_')) studentEmailPrefixInput.value = '';
+        }
+    });
+
+    studentParentNameInput.addEventListener('input', function() {
+        if (this.value.trim() !== '') {
+                generateParentCredentials(this.value);
+        }
+    });
 }
 
 // Add Student functionality
@@ -730,7 +1070,11 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
     e.preventDefault();
 
     const fullName = document.getElementById('studentFullName')?.value || '';
-    const email = document.getElementById('studentEmail')?.value || '';
+    const parentName = document.getElementById('studentParentName')?.value || '';
+    const emailPrefix = document.getElementById('studentEmailPrefix')?.value || '';
+    const email = emailPrefix ? emailPrefix + '@panda.com' : '';
+    const parentPassword = document.getElementById('studentParentPassword')?.value || '';
+    const phone = document.getElementById('studentPhone')?.value || '';
 
 
     // Capture multiple selected courses
@@ -771,6 +1115,7 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
     const newStudent = {
         name: fullName,
         email: email,
+        phone: phone,
         course: '', // سيتم ملؤه لاحقاً مع الأرقام التسلسلية
         date: date,
         total: `${totalAmount} دينار`,
@@ -801,6 +1146,7 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
     }
 
     let coursesWithSerials = [];
+    let coursesToUpdate = [];
 
     // Update course student count and handle new course creation if needed
     selectedCourses.split('، ').forEach(selectedCourseTitle => {
@@ -812,6 +1158,7 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
             if (currentStudentCount < 30) {
                 serialInCourse = currentStudentCount + 1;
                 course.students = serialInCourse; // تحديث عدد الطلاب في الدورة
+                coursesToUpdate.push(course);
                 newStudent[`serial_${course.id}`] = serialInCourse; // تخزين الرقم التسلسلي الخام
                 coursesWithSerials.push(`${course.title} (ر.ت: ${serialInCourse})`); // إضافة النص المنسق للعرض
             } else {
@@ -828,6 +1175,7 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
                 };
 
                 coursesData.push(newCourse);
+                coursesToUpdate.push(newCourse);
                 newStudent[`serial_${newCourse.id}`] = serialInCourse; // تخزين الرقم التسلسلي للدورة الجديدة
                 coursesWithSerials.push(`${newCourse.title} (ر.ت: ${serialInCourse})`); // إضافة النص المنسق للعرض
             }
@@ -837,22 +1185,62 @@ document.getElementById('addStudentForm')?.addEventListener('submit', async (e) 
         }
     });
 
+    newStudent.course = coursesWithSerials.join('، ');
+
     try {
-        const res = await fetch(`${API_BASE}/students`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ student: newStudent, recent: newRecent })
+        if (coursesToUpdate.length > 0) {
+            // تحديث بيانات الدورات (عدد الطلاب أو الدورات الجديدة)
+            const cRes = await fetch('api.php?endpoint=update/courses', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(coursesToUpdate)
+            });
+            const cResult = await cRes.json();
+            if (!cResult.success) throw new Error(cResult.message);
+        }
+
+        // إضافة الطالب في جدول الطلاب وجدول النشاطات الأخيرة
+        const sRes = await fetch('api.php?endpoint=students', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ student: newStudent, recent: newRecent })
         });
+        const sResult = await sRes.json();
 
-        if (res.ok) {
+        if (sResult.success) {
+            // إنشاء حساب ولي الأمر تلقائياً
+            if (parentPassword && email) {
+                const newRole = {
+                    name: "ولي أمر: " + (parentName || fullName),
+                    email: email,
+                    code: parentPassword,
+                    password: parentPassword
+                };
+                try {
+                    await fetch('api.php?endpoint=roles', { 
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({...newRole, roleCode: 'parent', statusCode: 'active'}) 
+                    });
+                } catch (e) { console.error("Error creating parent role:", e); }
+            }
+
             await loadDataFromDB();
+            alert('تم إضافة الطالب بنجاح!');
 
-            alert('تم إضافة الطالب بنجاح وحفظ البيانات في الخادم (JSON)!');
+            // إرسال رسالة واتساب
+            if (phone) {
+                let formattedPhone = phone.replace(/\D/g, ''); // إزالة المسافات والرموز
+                if (formattedPhone.startsWith('0')) {
+                    formattedPhone = '964' + formattedPhone.substring(1); // استخدام المفتاح الدولي (للعراق كمثال)
+                }
+                const waMsg = encodeURIComponent(`أهلاً بك ${fullName} في مركز الباندا التعليمي.\n\nتم تسجيلك بنجاح في: ${selectedCourses}\n\nبيانات حساب ولي الأمر لمتابعة الطالب:\nالبريد الإلكتروني: ${email}\nكلمة المرور: ${parentPassword}`);
+                window.open(`https://wa.me/${formattedPhone}?text=${waMsg}`, '_blank');
+            }
+            
             closeModal('student-modal');
             document.getElementById('addStudentForm').reset();
+        } else {
+            throw new Error(sResult.message);
         }
     } catch (err) {
-        alert("تعذر الاتصال بالخادم. يرجى التأكد من تشغيل server.js");
+        console.error("Error saving student:", err);
+        alert("تعذر حفظ البيانات: " + err.message);
     }
 });
 
@@ -864,13 +1252,15 @@ function editStudent(id) {
 
     document.getElementById('editStudentId').value = student.id;
     document.getElementById('editStudentFullName').value = student.name;
-    document.getElementById('editStudentEmail').value = student.email;
+    const emailPrefix = student.email ? student.email.split('@')[0] : '';
+    document.getElementById('editStudentEmailPrefix').value = emailPrefix;
+    document.getElementById('editStudentPhone').value = student.phone || '';
 
     // فتح النافذة أولاً لضمان تعبئة القوائم المنسدلة
     openModal('edit-student-modal');
 
     const courseSelect = document.getElementById('editStudentCourse');
-    const coursesArray = student.course.split('،').map(c => c.trim());
+    const coursesArray = student.course.split('،').map(c => c.replace(/\s*\(ر\.ت:\s*\d+\)/, '').trim());
     Array.from(courseSelect.options).forEach(opt => {
         opt.selected = coursesArray.includes(opt.value);
     });
@@ -901,15 +1291,25 @@ document.getElementById('editStudentForm')?.addEventListener('submit', async (e)
 
     const id = document.getElementById('editStudentId').value;
     const fullName = document.getElementById('editStudentFullName').value;
-    const email = document.getElementById('editStudentEmail').value;
+    const emailPrefix = document.getElementById('editStudentEmailPrefix').value;
+    const email = emailPrefix ? emailPrefix + '@panda.com' : '';
+    const phone = document.getElementById('editStudentPhone').value;
 
     const courseSelect = document.getElementById('editStudentCourse');
-    const selectedCourses = Array.from(courseSelect.selectedOptions).map(opt => opt.value).join('، ');
+    const selectedCourseTitles = Array.from(courseSelect.selectedOptions).map(opt => opt.value);
+    
+    const originalStudent = studentsData.find(s => s.id === id);
+    let coursesWithSerials = [];
+    selectedCourseTitles.forEach(title => {
+        const course = coursesData.find(c => c.title === title);
+        let serialText = course && originalStudent[`serial_${course.id}`] ? `${title} (ر.ت: ${originalStudent[`serial_${course.id}`]})` : title;
+        coursesWithSerials.push(serialText);
+    });
+    const finalCourseString = coursesWithSerials.join('، ');
 
     const classSelect = document.getElementById('editStudentClass');
     const selectedClassId = classSelect ? classSelect.value : null;
 
-    const originalStudent = studentsData.find(s => s.id === id);
 
     // التحقق من سعة الشعبة في حال تم نقل الطالب لشعبة جديدة
     if (selectedClassId && (selectedClassId !== originalStudent.class_id)) {
@@ -938,7 +1338,8 @@ document.getElementById('editStudentForm')?.addEventListener('submit', async (e)
     const updates = {
         name: fullName,
         email: email,
-        course: selectedCourses,
+        phone: phone,
+        course: finalCourseString,
         class_id: selectedClassId,
         total: `${totalAmount} دينار`,
         paid: `${paidAmount} دينار`,
@@ -948,32 +1349,42 @@ document.getElementById('editStudentForm')?.addEventListener('submit', async (e)
     };
 
     try {
-        const res = await fetch(`${API_BASE}/students/${id}`, {
+        const response = await fetch(`api.php?endpoint=students/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ student: updates })
+            body: JSON.stringify(updates)
         });
-        if (res.ok) {
+        const result = await response.json();
+
+        if (result.success) {
             await loadDataFromDB();
             alert('تم تعديل بيانات الطالب بنجاح!');
             closeModal('edit-student-modal');
         } else {
-            alert('فشل في التعديل');
+            throw new Error(result.message || "حدث خطأ غير معروف في الخادم");
         }
     } catch (e) {
-        alert("خطأ في الاتصال بالخادم");
+        console.error("Error updating student:", e);
+        alert("خطأ في حفظ التعديلات: " + e.message);
     }
 });
 
 async function deleteStudent(id) {
     if (confirm('هل أنت متأكد من حذف هذا الطالب نهائياً؟')) {
         try {
-            const res = await fetch(`${API_BASE}/students/${id}`, { method: 'DELETE' });
-            if (res.ok) {
+            const response = await fetch(`api.php?endpoint=students/${id}`, {
+                method: 'DELETE'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
                 await loadDataFromDB();
+            } else {
+                throw new Error(result.message || "حدث خطأ غير معروف في الخادم");
             }
         } catch (e) {
-            alert("خطأ في حذف الطالب");
+            console.error("Error deleting student:", e);
+            alert("خطأ في الحذف: " + e.message);
         }
     }
 }
@@ -1005,7 +1416,8 @@ function renderRoles(data = rolesData) {
                 </div>
             </td>
             <td>${r.email}</td>
-            <td>${r.password}</td>
+            <td style="font-family: monospace; font-weight: bold; color: var(--primary-color);">${r.code || '-'}</td>
+            <td style="font-family: monospace; color: var(--danger-color);">${r.password || '-'}</td>
             <td>${r.date}</td>
             <td><span class="status-badge status-${r.statusCode}">${r.role}</span></td>
             <td>
@@ -1037,25 +1449,45 @@ function filterRoles() {
 }
 
 function filterClassesForRole() {
-    const subject = document.getElementById('newRoleSubject')?.value;
+    const subjectSelect = document.getElementById('newRoleSubject');
     const classSelect = document.getElementById('newRoleClass');
+    
     if (!classSelect) return;
     
+    const subject = subjectSelect ? subjectSelect.value : '';
     const classesList = coursesData.filter(c => c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'));
-    const filtered = subject ? classesList.filter(c => c.subject === subject) : classesList;
     
-    classSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    if (subject && subject !== '') {
+        const filtered = classesList.filter(c => c.subject === subject);
+        if (filtered.length > 0) {
+            classSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        } else {
+            classSelect.innerHTML = `<option value="" disabled>-- لا توجد شعب متاحة لهذه المادة --</option>`;
+        }
+    } else {
+        classSelect.innerHTML = `<option value="" disabled>-- الرجاء تحديد المادة أولاً --</option>`;
+    }
 }
 
 function filterClassesForEditRole() {
-    const subject = document.getElementById('editRoleSubject')?.value;
+    const subjectSelect = document.getElementById('editRoleSubject');
     const classSelect = document.getElementById('editRoleClass');
+    
     if (!classSelect) return;
     
+    const subject = subjectSelect ? subjectSelect.value : '';
     const classesList = coursesData.filter(c => c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'));
-    const filtered = subject ? classesList.filter(c => c.subject === subject) : classesList;
     
-    classSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    if (subject && subject !== '') {
+        const filtered = classesList.filter(c => c.subject === subject);
+        if (filtered.length > 0) {
+            classSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        } else {
+            classSelect.innerHTML = `<option value="" disabled>-- لا توجد شعب متاحة لهذه المادة --</option>`;
+        }
+    } else {
+        classSelect.innerHTML = `<option value="" disabled>-- الرجاء تحديد المادة أولاً --</option>`;
+    }
 }
 
 function toggleRoleFields() {
@@ -1067,30 +1499,75 @@ function toggleRoleFields() {
     const classSelect = document.getElementById('newRoleClass');
     const studentSelect = document.getElementById('newRoleStudent');
 
-    if (!type || !subjectGroup || !studentGroup) return;
+    if (!subjectGroup || !studentGroup) return;
 
     if (type === 'teacher') {
         subjectGroup.style.display = 'block';
         if (classGroup) classGroup.style.display = 'block';
         studentGroup.style.display = 'none';
+        
         if (subjectSelect) subjectSelect.required = true;
         if (classSelect) classSelect.required = false;
         if (studentSelect) studentSelect.required = false;
+        
+        filterClassesForRole();
     } else if (type === 'parent') {
         subjectGroup.style.display = 'none';
         if (classGroup) classGroup.style.display = 'none';
         studentGroup.style.display = 'block';
+        
         if (subjectSelect) subjectSelect.required = false;
         if (classSelect) classSelect.required = false;
-        if (studentSelect) studentSelect.required = true;
+        if (studentSelect) studentSelect.required = false;
     } else {
         subjectGroup.style.display = 'none';
         if (classGroup) classGroup.style.display = 'none';
         studentGroup.style.display = 'none';
+        
         if (subjectSelect) subjectSelect.required = false;
         if (classSelect) classSelect.required = false;
         if (studentSelect) studentSelect.required = false;
     }
+}
+
+function filterParentStudents(nameId, selectId) {
+    const nameVal = document.getElementById(nameId)?.value.trim().toLowerCase() || '';
+    const studentSelect = document.getElementById(selectId);
+    if (!studentSelect) return;
+    
+    // الاحتفاظ بالخيارات المحددة مسبقاً حتى لا تضيع أثناء الفلترة
+    const selectedIds = Array.from(studentSelect.selectedOptions).map(opt => opt.value);
+    
+    if (nameVal === '') {
+        studentSelect.innerHTML = studentsData.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('');
+    } else {
+        let sortedStudents = [...studentsData];
+        const nameParts = nameVal.split(' ').filter(p => p.length > 1);
+        
+        // ترتيب الطلاب وإعطاء الأولوية للأسماء المطابقة
+        sortedStudents.sort((a, b) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            let aScore = 0; let bScore = 0;
+            
+            if (aName.includes(nameVal)) aScore += 10;
+            if (bName.includes(nameVal)) bScore += 10;
+            
+            nameParts.forEach(part => {
+                if (aName.includes(part)) aScore += 1;
+                if (bName.includes(part)) bScore += 1;
+            });
+            
+            return bScore - aScore;
+        });
+        
+        const limited = sortedStudents.slice(0, 100);
+        studentSelect.innerHTML = limited.map(s => `<option value="${s.id}">${s.name} - ${s.course}</option>`).join('') + (sortedStudents.length > 100 ? `<option disabled>... و ${sortedStudents.length - 100} آخرين</option>` : '');
+    }
+    
+    Array.from(studentSelect.options).forEach(opt => {
+        if (selectedIds.includes(opt.value)) opt.selected = true;
+    });
 }
 
 document.getElementById('roles-search')?.addEventListener('input', filterRoles);
@@ -1098,7 +1575,15 @@ document.getElementById('roles-filter')?.addEventListener('change', filterRoles)
 
 async function addRole() {
     const name = document.getElementById('newRoleName').value;
-    const email = document.getElementById('newRoleEmail').value;
+    const emailPrefixEl = document.getElementById('newRoleEmailPrefix');
+    const emailEl = document.getElementById('newRoleEmail');
+    let email = '';
+    if (emailPrefixEl) {
+        email = emailPrefixEl.value + '@panda.com';
+    } else if (emailEl) {
+        email = emailEl.value;
+    }
+    const code = document.getElementById('newRoleCode').value;
     const password = document.getElementById('newRolePassword').value;
     const type = document.getElementById('newRoleType').value;
 
@@ -1106,96 +1591,75 @@ async function addRole() {
     let statusCode = 'active';
 
     const newRole = {
+        id: crypto.randomUUID(),
         name: name,
         email: email,
-        password: password,
+        code: code,
+        password_hash: password, // مؤقتاً
+        plain_password: password,
         date: new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'short', year: 'numeric' }),
         role: roleName,
-        roleCode: type,
-        statusCode: statusCode
+        role_code: type,
+        status_code: statusCode
     };
 
     try {
-        const response = await fetch(`${API_BASE}/roles`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newRole)
+        const roleRes = await fetch('api.php?endpoint=roles', { 
+            method: 'POST', headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({...newRole, roleCode: type, statusCode: statusCode}) 
         });
-
-        const result = await response.json();
-        if (!response.ok) {
-            alert(result.error);
-            return;
-        }
+        const roleData = await roleRes.json();
+        if (!roleData.success) throw new Error(roleData.message);
 
         // إنشاء مدرس آلياً إذا كانت الصلاحية "معلم"
         if (type === 'teacher') {
             const spec = document.getElementById('newRoleSubject').value;
             const newInstructor = { id: 'Inst-' + Date.now(), name: name, spec: spec, phone: '', img: '' };
-            try {
-                await fetch(`${API_BASE}/update/instructors`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newInstructor)
-                });
-                
-                // ربط الشعب بالمعلم
-                const classOptions = document.getElementById('newRoleClass').selectedOptions;
-                const classIds = Array.from(classOptions).map(opt => opt.value);
-                for(let classId of classIds) {
-                    const cls = coursesData.find(c => c.id === classId);
-                    if(cls) {
-                        await fetch(`${API_BASE}/courses/${classId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ instructor: name })
-                        });
-                    }
-                }
-            } catch (e) { console.error("Error creating instructor:", e); }
-        }
-
-        // ربط حساب ولي الأمر بالطلاب المعنيين (من خلال تحديث بريد الطالب لمطابقة بريد ولي الأمر)
-        if (type === 'parent') {
-            const studentOptions = document.getElementById('newRoleStudent').selectedOptions;
-            const studentIds = Array.from(studentOptions).map(opt => opt.value);
+            await fetch('api.php?endpoint=update/instructors', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([newInstructor]) });
             
-            for (let studentId of studentIds) {
-                const student = studentsData.find(s => s.id === studentId);
-                if (student) {
-                    const updates = { ...student, email: email };
-                    try {
-                        await fetch(`${API_BASE}/students/${studentId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ student: updates })
-                        });
-                    } catch (e) { console.error("Error linking student:", e); }
+            // ربط المدرس بالشعب
+            const classSelect = document.getElementById('newRoleClass');
+            if (classSelect) {
+                const selectedClassIds = Array.from(classSelect.selectedOptions).map(opt => opt.value);
+                for (let classId of selectedClassIds) {
+                    await fetch(`api.php?endpoint=courses/${classId}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ instructor: name }) });
                 }
             }
         }
 
-        await loadDataFromDB(); // تحديث جميع البيانات لتعكس التغييرات
+        // ربط حساب ولي الأمر بالطلاب
+        if (type === 'parent') {
+            const studentOptions = document.getElementById('newRoleStudent').selectedOptions;
+            const studentIds = Array.from(studentOptions).map(opt => opt.value);
+            for (let studentId of studentIds) {
+                await fetch(`api.php?endpoint=students/${studentId}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ email: email }) });
+            }
+        }
+
+        await loadDataFromDB();
         closeModal('add-role-modal');
         document.getElementById('addRoleForm').reset();
         if (typeof toggleRoleFields === 'function') toggleRoleFields();
-        alert('تم إضافة الصلاحية وتحديث الارتباطات بنجاح!');
+        alert('تم إضافة المستخدم بنجاح!');
     } catch (e) {
-        alert("تعذر الاتصال بالخادم.");
+        console.error("Error adding role:", e);
+        alert("تعذر الحفظ: " + e.message);
     }
 }
 
 async function deleteRole(email) {
     if (confirm('هل أنت متأكد من حذف هذا المستخدم وصلاحياته؟')) {
         try {
-            const response = await fetch(`${API_BASE}/roles/${email}`, { method: 'DELETE' });
-            if (response.ok) {
-                const result = await response.json();
-                rolesData = result.roles;
-                renderRoles();
+            const res = await fetch(`api.php?endpoint=roles/${encodeURIComponent(email)}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+            } else {
+                throw new Error(result.message);
             }
         } catch (e) {
-            alert("فشل الحذف، يرجى التحقق من الخادم.");
+            console.error("Error deleting role:", e);
+            alert("فشل الحذف.");
         }
     }
 }
@@ -1205,19 +1669,19 @@ async function updateRoleType(email, newType) {
     let statusCode = 'active';
 
     try {
-        const response = await fetch(`${API_BASE}/roles/${email}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roleCode: newType, role: roleName, statusCode: statusCode })
+        const res = await fetch(`api.php?endpoint=roles/${encodeURIComponent(email)}`, { 
+            method: 'PUT', headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({ roleCode: newType, role: roleName, statusCode: statusCode }) 
         });
-
-        if (response.ok) {
-            const result = await response.json();
-            rolesData = result.roles;
-            renderRoles();
-            alert('تم التحديث في ملف JSON بنجاح!');
+        const result = await res.json();
+        if (result.success) {
+            await loadDataFromDB();
+            alert('تم تحديث الصلاحية بنجاح!');
+        } else {
+            throw new Error(result.message);
         }
     } catch (e) {
+        console.error("Error updating role type:", e);
         alert("تعذر حفظ التحديث.");
     }
 }
@@ -1231,26 +1695,31 @@ function toggleEditRoleFields() {
     const classSelect = document.getElementById('editRoleClass');
     const studentSelect = document.getElementById('editRoleStudent');
 
-    if (!type || !subjectGroup || !studentGroup) return;
+    if (!subjectGroup || !studentGroup) return;
 
     if (type === 'teacher') {
         subjectGroup.style.display = 'block';
         if (classGroup) classGroup.style.display = 'block';
         studentGroup.style.display = 'none';
+        
         if (subjectSelect) subjectSelect.required = true;
         if (classSelect) classSelect.required = false;
         if (studentSelect) studentSelect.required = false;
+        
+        filterClassesForEditRole();
     } else if (type === 'parent') {
         subjectGroup.style.display = 'none';
         if (classGroup) classGroup.style.display = 'none';
         studentGroup.style.display = 'block';
+        
         if (subjectSelect) subjectSelect.required = false;
         if (classSelect) classSelect.required = false;
-        if (studentSelect) studentSelect.required = true;
+        if (studentSelect) studentSelect.required = false;
     } else {
         subjectGroup.style.display = 'none';
         if (classGroup) classGroup.style.display = 'none';
         studentGroup.style.display = 'none';
+        
         if (subjectSelect) subjectSelect.required = false;
         if (classSelect) classSelect.required = false;
         if (studentSelect) studentSelect.required = false;
@@ -1265,24 +1734,37 @@ function editRole(email) {
 
     document.getElementById('editRoleOriginalEmail').value = role.email;
     document.getElementById('editRoleName').value = role.name;
-    document.getElementById('editRoleEmail').value = role.email;
-    document.getElementById('editRolePassword').value = role.password;
+    document.getElementById('editRoleEmailPrefix').value = role.email.split('@')[0];
+    const codeEl = document.getElementById('editRoleCode');
+    if (codeEl) codeEl.value = role.code || '';
+    const pw = document.getElementById('editRolePassword');
+    if (pw) pw.value = '';
     document.getElementById('editRoleType').value = role.roleCode;
 
     toggleEditRoleFields();
 
     if (role.roleCode === 'teacher') {
+        let spec = '';
         const inst = instructorsData.find(i => i.name === role.name);
-        if (inst && document.getElementById('editRoleSubject')) {
-            document.getElementById('editRoleSubject').value = inst.spec;
-            filterClassesForEditRole();
+        if (inst && inst.spec) {
+            spec = inst.spec;
+        } else {
+            const assignedClass = coursesData.find(c => c.instructor === role.name && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
+            if (assignedClass) spec = assignedClass.subject;
         }
         
+        if (document.getElementById('editRoleSubject') && spec) {
+            document.getElementById('editRoleSubject').value = spec;
+        }
+        
+        filterClassesForEditRole();
+        
+        const assignedClasses = coursesData.filter(c => c.instructor === role.name && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
         const classSelect = document.getElementById('editRoleClass');
         if (classSelect) {
-            const teacherClasses = coursesData.filter(c => c.instructor === role.name).map(c => c.id);
+            const assignedIds = assignedClasses.map(c => c.id);
             Array.from(classSelect.options).forEach(opt => {
-                opt.selected = teacherClasses.includes(opt.value);
+                opt.selected = assignedIds.includes(opt.value);
             });
         }
     } else if (role.roleCode === 'parent') {
@@ -1301,6 +1783,7 @@ document.getElementById('editRoleForm')?.addEventListener('submit', async (e) =>
 
     const originalEmail = document.getElementById('editRoleOriginalEmail').value;
     const name = document.getElementById('editRoleName').value;
+    const code = document.getElementById('editRoleCode').value;
     const password = document.getElementById('editRolePassword').value;
     const type = document.getElementById('editRoleType').value;
 
@@ -1309,23 +1792,21 @@ document.getElementById('editRoleForm')?.addEventListener('submit', async (e) =>
 
     const updates = {
         name: name,
-        password: password,
+        code: code,
         role: roleName,
-        roleCode: type,
-        statusCode: statusCode
+        role_code: type,
+        status_code: statusCode
     };
+    
+    if (password) {
+        updates.password_hash = password;
+        updates.plain_password = password;
+    }
 
     try {
-        const response = await fetch(`${API_BASE}/roles/${originalEmail}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updates)
-        });
-
-        if (!response.ok) {
-            alert('فشل تحديث الصلاحية');
-            return;
-        }
+        const res = await fetch(`api.php?endpoint=roles/${encodeURIComponent(originalEmail)}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+        const result = await res.json();
+        if (!result.success) throw new Error(result.message);
 
         if (type === 'teacher') {
             const spec = document.getElementById('editRoleSubject').value;
@@ -1333,41 +1814,29 @@ document.getElementById('editRoleForm')?.addEventListener('submit', async (e) =>
             const oldName = originalRole ? originalRole.name : name;
             const inst = instructorsData.find(i => i.name === oldName);
             if (inst) {
-                await fetch(`${API_BASE}/instructors/${inst.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name, spec: spec })
-                });
+                await fetch(`api.php?endpoint=instructors/${inst.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: name, spec: spec }) });
             } else {
                 const newInstructor = { id: 'Inst-' + Date.now(), name: name, spec: spec, phone: '', img: '' };
-                await fetch(`${API_BASE}/update/instructors`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newInstructor)
-                });
+                await fetch('api.php?endpoint=update/instructors', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify([newInstructor]) });
             }
             
-            // تحديث الشعب المرتبطة بالمعلم
-            const classOptions = document.getElementById('editRoleClass').selectedOptions;
-            const selectedClassIds = Array.from(classOptions).map(opt => opt.value);
-            
-            const previousClasses = coursesData.filter(c => c.instructor === oldName);
-            for (let c of previousClasses) {
-                if (!selectedClassIds.includes(c.id)) {
-                    await fetch(`${API_BASE}/courses/${c.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ instructor: 'غير محدد' })
-                    });
+            // تحديث ارتباط الشعب
+            const classSelect = document.getElementById('editRoleClass');
+            if (classSelect) {
+                const selectedClassIds = Array.from(classSelect.selectedOptions).map(opt => opt.value);
+                
+                // إزالة المدرس من الشعب السابقة
+                const previousClasses = coursesData.filter(c => c.instructor === oldName && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
+                for (let c of previousClasses) {
+                    if (!selectedClassIds.includes(c.id)) {
+                        await fetch(`api.php?endpoint=courses/${c.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ instructor: 'غير محدد' }) });
+                    }
                 }
-            }
 
-            for (let classId of selectedClassIds) {
-                await fetch(`${API_BASE}/courses/${classId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ instructor: name })
-                });
+                // إضافة المدرس للشعب المحددة
+                for (let classId of selectedClassIds) {
+                    await fetch(`api.php?endpoint=courses/${classId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ instructor: name }) });
+                }
             }
         }
 
@@ -1378,23 +1847,12 @@ document.getElementById('editRoleForm')?.addEventListener('submit', async (e) =>
             const previousStudents = studentsData.filter(s => s.email === originalEmail);
             for (let s of previousStudents) {
                 if (!selectedStudentIds.includes(s.id)) {
-                    await fetch(`${API_BASE}/students/${s.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ student: { ...s, email: '' } })
-                    });
+                    await fetch(`api.php?endpoint=students/${s.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: '' }) });
                 }
             }
 
             for (let studentId of selectedStudentIds) {
-                const student = studentsData.find(s => s.id === studentId);
-                if (student && student.email !== originalEmail) {
-                    await fetch(`${API_BASE}/students/${studentId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ student: { ...student, email: originalEmail } })
-                    });
-                }
+                await fetch(`api.php?endpoint=students/${studentId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: originalEmail }) });
             }
         }
 
@@ -1402,7 +1860,8 @@ document.getElementById('editRoleForm')?.addEventListener('submit', async (e) =>
         closeModal('edit-role-modal');
         alert('تم تعديل المستخدم بنجاح!');
     } catch (e) {
-        alert("تعذر الاتصال بالخادم.");
+        console.error("Error editing role:", e);
+        alert("تعذر الحفظ.");
     }
 });
 
@@ -1428,10 +1887,63 @@ function renderRecentStudents() {
     `).join('');
 }
 
-function renderStudents() {
+let currentStudentsPage = 1;
+const studentsPerPage = 50;
+let filteredStudentsData = [];
+
+function filterMainStudents() {
+    const searchInput = document.getElementById('students-search-input');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    
+    if (searchTerm.trim() === '') {
+        filteredStudentsData = [];
+    } else {
+        filteredStudentsData = studentsData.filter(s => 
+            s.name.toLowerCase().includes(searchTerm) || 
+            (s.id && s.id.toLowerCase().includes(searchTerm)) ||
+            (s.course && s.course.toLowerCase().includes(searchTerm))
+        );
+    }
+    renderStudents(1);
+}
+
+function renderStudents(page = 1) {
     const tbody = document.getElementById("students-table-body");
     if (!tbody) return;
-    tbody.innerHTML = studentsData.map((s) => {
+
+    let searchContainer = document.getElementById("students-search-container");
+    if (!searchContainer) {
+        const tableContainer = tbody.closest('.table-responsive');
+        if (tableContainer && tableContainer.parentNode) {
+            searchContainer = document.createElement("div");
+            searchContainer.id = "students-search-container";
+            searchContainer.style = "margin-bottom: 15px; display: flex; gap: 10px;";
+            searchContainer.innerHTML = `
+                <input type="text" id="students-search-input" class="form-input" placeholder="بحث عن طالب (بالاسم، الدورة، رقم التسجيل)..." style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <button class="btn" onclick="filterMainStudents()" style="padding: 10px 20px;">بحث</button>
+            `;
+            tableContainer.parentNode.insertBefore(searchContainer, tableContainer);
+            document.getElementById('students-search-input').addEventListener('input', () => filterMainStudents());
+        }
+    }
+
+    const dataToRender = filteredStudentsData.length > 0 || (document.getElementById('students-search-input') && document.getElementById('students-search-input').value.trim() !== '') 
+        ? filteredStudentsData 
+        : studentsData;
+
+    const totalPages = Math.ceil(dataToRender.length / studentsPerPage) || 1;
+    if (page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    currentStudentsPage = page;
+
+    const startIdx = (page - 1) * studentsPerPage;
+    const endIdx = startIdx + studentsPerPage;
+    const paginatedData = dataToRender.slice(startIdx, endIdx);
+
+    if (paginatedData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 20px;">لا توجد بيانات للعرض</td></tr>';
+    } else {
+        tbody.innerHTML = paginatedData.map((s) => {
         let className = "غير محدد";
         let studentSerial = "-";
 
@@ -1482,7 +1994,27 @@ function renderStudents() {
                 <button class="btn-icon" title="حذف" style="color: var(--danger-color);" onclick="deleteStudent('${s.id}')"><i class='bx bx-trash'></i></button>
             </td>
         </tr>
-    `}).join('');
+        `;
+        }).join('');
+    }
+
+    let paginationContainer = document.getElementById("students-pagination");
+    if (!paginationContainer) {
+        const tableContainer = tbody.closest('.table-responsive');
+        if (tableContainer && tableContainer.parentNode) {
+            paginationContainer = document.createElement("div");
+            paginationContainer.id = "students-pagination";
+            paginationContainer.style = "display: flex; justify-content: center; gap: 10px; margin-top: 15px; align-items: center;";
+            tableContainer.parentNode.insertBefore(paginationContainer, tableContainer.nextSibling);
+        }
+    }
+    if (paginationContainer) {
+        paginationContainer.innerHTML = `
+            <button class="btn" onclick="renderStudents(${currentStudentsPage - 1})" ${currentStudentsPage === 1 ? 'disabled' : ''}>السابق</button>
+            <span style="font-weight: bold; margin: 0 10px;">صفحة ${currentStudentsPage} من ${totalPages} (إجمالي ${dataToRender.length} طالب)</span>
+            <button class="btn" onclick="renderStudents(${currentStudentsPage + 1})" ${currentStudentsPage === totalPages ? 'disabled' : ''}>التالي</button>
+        `;
+    }
 }
 
 // === Print Receipt Logic ===
@@ -1530,19 +2062,58 @@ function printReceipt(id) {
     document.getElementById('print-remaining-amount').textContent = remainingText;
 
     // Trigger Print Command
+    document.body.classList.add('printing-receipt');
     window.print();
+    setTimeout(() => {
+        document.body.classList.remove('printing-receipt');
+    }, 500);
 }
 
 function renderInstructors() {
     const grid = document.getElementById("instructors-grid");
+    const specFilterEl = document.getElementById("instructor-spec-filter");
+    const searchEl = document.getElementById("instructor-search");
+    
     if (!grid) return;
-    grid.innerHTML = instructorsData.map(i => `
+
+    // تحديث قائمة التخصصات في الفلتر
+    if (specFilterEl && specFilterEl.options.length <= 1) {
+        specFilterEl.innerHTML = '<option value="all">جميع التخصصات</option>' + subjectsData.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+    }
+
+    const specFilter = specFilterEl ? specFilterEl.value : 'all';
+    const searchTerm = (searchEl ? searchEl.value : '').toLowerCase();
+
+    // تطبيق الفلاتر
+    const filteredInstructors = instructorsData.filter(i => {
+        const matchSpec = specFilter === 'all' || i.spec === specFilter;
+        const matchSearch = !searchTerm || i.name.toLowerCase().includes(searchTerm) || (i.phone && i.phone.includes(searchTerm));
+        return matchSpec && matchSearch;
+    });
+
+    if (filteredInstructors.length === 0) {
+        grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted);">لا توجد بيانات مطابقة للبحث.</div>';
+        return;
+    }
+
+    grid.innerHTML = filteredInstructors.map(i => {
+        // حساب الشعب والدورات المخصصة لهذا المدرس
+        const assignedClasses = coursesData.filter(c => c.instructor === i.name && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'))).length;
+        const assignedCourses = coursesData.filter(c => c.instructor === i.name && c.duration !== 'غير محدد' && !c.title.includes(' - نسخة جديدة')).length;
+        
+        return `
         <div class="card person-card">
             <div class="person-img-wrapper">
                 <img src="${i.img || `https://ui-avatars.com/api/?name=${encodeURIComponent(i.name)}&background=random&size=150`}" alt="${i.name}">
             </div>
             <h3>${i.name}</h3>
-            <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 15px;">${i.spec}</p>
+            <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 10px;">${i.spec || 'غير محدد'}</p>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center;">
+                <span class="badge" style="background: rgba(79, 70, 229, 0.1); color: var(--primary-color); border: 1px solid rgba(79, 70, 229, 0.2); font-size: 12px;">${assignedCourses} دورات</span>
+                <span class="badge" style="background: rgba(16, 185, 129, 0.1); color: var(--secondary-color); border: 1px solid rgba(16, 185, 129, 0.2); font-size: 12px;">${assignedClasses} شعب مخصصة</span>
+            </div>
+
             <div style="background: var(--bg-color); padding: 8px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px;">
                 <i class='bx bx-phone' style="color: var(--primary-color);"></i>
                 <span dir="ltr" style="font-weight: 600;">${i.phone || 'غير متوفر'}</span>
@@ -1552,7 +2123,28 @@ function renderInstructors() {
                 <button class="btn btn-icon" title="حذف" style="color: var(--danger-color);" onclick="deleteInstructor('${i.id}')"><i class='bx bx-trash'></i></button>
             </div>
         </div>
-    `).join('');
+    `}).join('');
+}
+
+function filterClassesForEditInstructor() {
+    const subject = document.getElementById('editInstructorSubject')?.value;
+    const classSelect = document.getElementById('editInstructorClass');
+    const classGroup = document.getElementById('editInstructorClassGroup');
+    if (!classSelect) return;
+    
+    const classesList = coursesData.filter(c => c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'));
+    
+    if (subject) {
+        const filtered = classesList.filter(c => c.subject === subject);
+        if (filtered.length > 0) {
+            classSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        } else {
+            classSelect.innerHTML = `<option value="" disabled>-- لا توجد شعب متاحة لهذه المادة --</option>`;
+        }
+    } else {
+        classSelect.innerHTML = `<option value="" disabled>-- حدد المادة أولاً --</option>`;
+    }
+    if (classGroup) classGroup.style.display = 'block';
 }
 
 function editInstructor(id) {
@@ -1574,6 +2166,16 @@ function editInstructor(id) {
             subjectsData.map(s => `<option value="${s.name}" ${s.name === instructor.spec ? 'selected' : ''}>${s.name}</option>`).join('');
     }
 
+    filterClassesForEditInstructor();
+    const assignedClasses = coursesData.filter(c => c.instructor === instructor.name && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
+    const classSelect = document.getElementById('editInstructorClass');
+    if (classSelect) {
+        const assignedIds = assignedClasses.map(c => c.id);
+        Array.from(classSelect.options).forEach(opt => {
+            opt.selected = assignedIds.includes(opt.value);
+        });
+    }
+
     openModal('edit-instructor-modal');
 }
 
@@ -1586,42 +2188,59 @@ document.getElementById('editInstructorForm')?.addEventListener('submit', async 
     const phone = document.getElementById('editInstructorPhone').value;
 
     const updates = { name, spec, phone };
+    
+    const originalInstructor = instructorsData.find(i => i.id === id);
+    const oldName = originalInstructor ? originalInstructor.name : name;
 
     try {
-        const res = await fetch(`${API_BASE}/instructors/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updates)
-        });
+        const res = await fetch(`api.php?endpoint=instructors/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+        const result = await res.json();
         
-        if (res.ok) {
-            const index = instructorsData.findIndex(i => i.id === id);
-            if (index !== -1) {
-                instructorsData[index] = { ...instructorsData[index], ...updates };
-                renderInstructors();
+        if (result.success) {
+            // تحديث ارتباط الشعب
+            const classSelect = document.getElementById('editInstructorClass');
+            if (classSelect) {
+                const selectedClassIds = Array.from(classSelect.selectedOptions).map(opt => opt.value);
+                
+                // إزالة المدرس من الشعب السابقة
+                const previousClasses = coursesData.filter(c => c.instructor === oldName && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
+                for (let c of previousClasses) {
+                    if (!selectedClassIds.includes(c.id)) {
+                        await fetch(`api.php?endpoint=courses/${c.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ instructor: 'غير محدد' }) });
+                    }
+                }
+
+                // إضافة المدرس للشعب المحددة
+                for (let classId of selectedClassIds) {
+                    await fetch(`api.php?endpoint=courses/${classId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ instructor: name }) });
+                }
             }
+
+            await loadDataFromDB();
             closeModal('edit-instructor-modal');
             alert('تم تعديل بيانات المدرس بنجاح!');
         } else {
-            alert('فشل في التعديل، يرجى التحقق من الخادم.');
+            throw new Error(result.message);
         }
     } catch (e) {
-        alert("خطأ في الاتصال بالخادم");
+        console.error("Error editing instructor:", e);
+        alert("خطأ في الحفظ.");
     }
 });
 
 async function deleteInstructor(id) {
     if (confirm('هل أنت متأكد من حذف هذا المدرس نهائياً؟')) {
         try {
-            const res = await fetch(`${API_BASE}/instructors/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                instructorsData = instructorsData.filter(i => i.id !== id);
-                renderInstructors();
+            const res = await fetch(`api.php?endpoint=instructors/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
             } else {
-                alert('حدث خطأ أثناء الحذف من الخادم.');
+                throw new Error(result.message);
             }
         } catch (e) {
-            alert('خطأ في الاتصال بالخادم.');
+            console.error("Error deleting instructor:", e);
+            alert('خطأ في الحذف.');
         }
     }
 }
@@ -1635,7 +2254,7 @@ function renderCourses() {
     grid.innerHTML = trainingCourses.map(c => `
         <div class="card course-card">
             <div class="course-img-wrapper">
-                <img src="${c.img || 'https://via.placeholder.com/300x200'}" alt="${c.title}" class="course-img">
+                <img src="${c.img || 'https://placehold.co/300x200'}" alt="${c.title}" class="course-img">
                 <span class="course-subject-badge">${c.subject}</span>
             </div>
             <div class="card-body">
@@ -1726,6 +2345,7 @@ function renderClassManagement() {
                         </div>
                         <div style="display: flex; gap: 5px;">
                             <button class="btn btn-icon" title="طباعة تقرير الشعبة" onclick="printClassReport('${cls.id}')" style="color: var(--primary-color); padding: 5px; border: 1px solid var(--border-color);"><i class='bx bx-printer'></i></button>
+                            <button class="btn btn-icon" title="إضافة موعد للجدول" onclick="openScheduleModalForClass('${cls.id}')" style="color: #10b981; padding: 5px; border: 1px solid var(--border-color);"><i class='bx bx-calendar-plus'></i></button>
                             <button class="btn btn-icon" title="تعديل الشعبة" onclick="editClass('${cls.id}')" style="color: #f59e0b; padding: 5px; border: 1px solid var(--border-color);"><i class='bx bx-edit'></i></button>
                             <button class="btn btn-icon" title="حذف الشعبة" onclick="deleteClass('${cls.id}')" style="color: var(--danger-color); padding: 5px; border: 1px solid var(--border-color);"><i class='bx bx-trash'></i></button>
                         </div>
@@ -1742,6 +2362,27 @@ function renderClassManagement() {
     }
 
     container.innerHTML = html;
+}
+
+function openScheduleModalForClass(classId) {
+    const cls = coursesData.find(c => c.id === classId);
+    if (!cls) return;
+    
+    openModal('add-schedule-modal');
+    setTimeout(() => {
+        const parentCourse = coursesData.find(c => c.subject === cls.subject && c.duration !== 'غير محدد' && !c.title.includes(' - نسخة جديدة'));
+        if (parentCourse) {
+            const courseSelect = document.getElementById('scheduleCourse');
+            if (courseSelect) {
+                courseSelect.value = parentCourse.id;
+                filterClassesForSchedule();
+                setTimeout(() => {
+                    const classSelect = document.getElementById('scheduleClass');
+                    if (classSelect) { classSelect.value = cls.id; autoFillInstructorForSchedule(); }
+                }, 50);
+            }
+        }
+    }, 50);
 }
 
 // === Print Class Report Logic ===
@@ -1809,9 +2450,10 @@ function printClassReport(classId) {
         <html>
         <head>
             <title>طباعة تقرير الشعبة</title>
-            <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Public+Sans:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
             <style>
-                body { font-family: 'Cairo', sans-serif; }
+                body { font-family: 'Public Sans', 'Tajawal', sans-serif; }
+                h1, h2, h3 { font-family: 'Cairo', sans-serif; }
                 @media print { @page { margin: 1cm; } }
             </style>
         </head>
@@ -1843,22 +2485,31 @@ function editClass(id) {
             subjectsData.map(s => `<option value="${s.name}" ${s.name === cls.subject ? 'selected' : ''}>${s.name}</option>`).join('');
     }
 
+    const instSelect = document.getElementById('editClassInstructor');
+    if (instSelect) {
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` +
+            instructorsData.map(i => `<option value="${i.name}" ${i.name === cls.instructor ? 'selected' : ''}>${i.name}</option>`).join('') +
+            `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+    }
+
     openModal('edit-class-modal');
 }
 
 async function deleteClass(id) {
     if (confirm('هل أنت متأكد من حذف هذه الشعبة نهائياً؟ ستيم إزالتها من سجلات النظام.')) {
         try {
-            const res = await fetch(`${API_BASE}/courses/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                coursesData = coursesData.filter(c => c.id !== id);
+            const res = await fetch(`api.php?endpoint=courses/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
                 if (typeof renderClassManagement === 'function') renderClassManagement();
                 if (typeof renderCourses === 'function') renderCourses();
             } else {
-                alert('حدث خطأ أثناء الحذف من الخادم.');
+                throw new Error(result.message);
             }
         } catch (e) {
-            alert('خطأ في الاتصال بالخادم.');
+            console.error("Error deleting class:", e);
+            alert('خطأ في الحذف.');
         }
     }
 }
@@ -1878,32 +2529,20 @@ function editCourse(id) {
 
     const instSelect = document.getElementById('editCourseInstructor');
     if (instSelect) {
-        const filteredInsts = instructorsData.filter(i => i.spec === course.subject);
-        if (filteredInsts.length > 0) {
-            instSelect.innerHTML = filteredInsts.map(i => `<option value="${i.name}" ${i.name === course.instructor ? 'selected' : ''}>${i.name}</option>`).join('');
-        } else {
-            instSelect.innerHTML = `<option value="">-- لا يوجد مدرس لهذه المادة --</option>`;
-        }
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` +
+            instructorsData.map(i => `<option value="${i.name}" ${i.name === course.instructor ? 'selected' : ''}>${i.name}</option>`).join('') +
+            `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
     }
 
     openModal('edit-course-modal');
 }
 
 function filterInstructorsForEditCourse() {
-    const selectedSub = document.getElementById('editCourseSubject')?.value;
     const instSelect = document.getElementById('editCourseInstructor');
-    if (!instSelect) return;
-
-    if (!selectedSub) {
-        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
-        return;
-    }
-
-    const filteredInsts = instructorsData.filter(i => i.spec === selectedSub);
-    if (filteredInsts.length > 0) {
-        instSelect.innerHTML = filteredInsts.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
-    } else {
-        instSelect.innerHTML = `<option value="">-- لا يوجد مدرس لهذه المادة --</option>`;
+    if (instSelect) {
+        const currentVal = instSelect.value;
+        instSelect.innerHTML = `<option value="">-- حدد المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('') + `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        if (currentVal) instSelect.value = currentVal;
     }
 }
 
@@ -1918,23 +2557,22 @@ document.getElementById('editCourseForm')?.addEventListener('submit', async (e) 
 
     let imgBase64 = "";
     const saveEditedCourse = async () => {
-        
         const updates = { title, subject, instructor, duration };
         if (imgBase64) updates.img = imgBase64;
         
         try {
-            const res = await fetch(`${API_BASE}/courses/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-            if (res.ok) {
+            const res = await fetch(`api.php?endpoint=courses/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+            const result = await res.json();
+            if (result.success) {
                 const index = coursesData.findIndex(c => c.id === id);
                 if (index !== -1) { coursesData[index] = { ...coursesData[index], ...updates }; renderCourses(); }
                 closeModal('edit-course-modal');
                 alert('تم تعديل الدورة بنجاح!');
-            } else { alert('فشل في التعديل، يرجى التحقق من الخادم.'); }
-        } catch (e) { alert("خطأ في الاتصال بالخادم"); }
+            } else { throw new Error(result.message); }
+        } catch (e) { 
+            console.error("Error editing course:", e);
+            alert("خطأ في الحفظ."); 
+        }
     };
 
     if (fileInput && fileInput.files && fileInput.files[0]) {
@@ -1947,9 +2585,18 @@ document.getElementById('editCourseForm')?.addEventListener('submit', async (e) 
 async function deleteCourse(id) {
     if (confirm('هل أنت متأكد من حذف هذه الدورة نهائياً؟')) {
         try {
-            const res = await fetch(`${API_BASE}/courses/${id}`, { method: 'DELETE' });
-            if (res.ok) { coursesData = coursesData.filter(c => c.id !== id); renderCourses(); }
-        } catch (e) { alert('خطأ في الاتصال بالخادم.'); }
+            const res = await fetch(`api.php?endpoint=courses/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                renderCourses();
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (e) {
+            console.error("Error deleting course:", e);
+            alert('خطأ في الحذف.');
+        }
     }
 }
 
@@ -2052,21 +2699,16 @@ document.addEventListener('submit', async (e) => {
 
         const updates = { name, desc };
         try {
-            const res = await fetch(`${API_BASE}/subjects/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-            if (res.ok) {
+            const res = await fetch(`api.php?endpoint=subjects/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+            const result = await res.json();
+            if (result.success) {
                 await loadDataFromDB(); 
                 closeModal('edit-subject-modal');
                 alert('تم تعديل المادة الدراسية بنجاح!');
-            } else {
-                const errorData = await res.json();
-                alert(errorData.message || 'فشل في التعديل، يرجى التحقق من الخادم.');
-            }
+            } else { throw new Error(result.message); }
         } catch (err) {
-            alert("خطأ في الاتصال بالخادم");
+            console.error("Error editing subject:", err);
+            alert("خطأ في الحفظ.");
         }
     }
 
@@ -2084,45 +2726,57 @@ document.addEventListener('submit', async (e) => {
 
         const updates = { receipt, student, amount, method, statusCode, status, notes };
         try {
-            const res = await fetch(`${API_BASE}/accounting/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-            if (res.ok) {
+            const res = await fetch(`api.php?endpoint=accounting/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+            const result = await res.json();
+            if (result.success) {
                 await loadDataFromDB(); 
                 closeModal('edit-accounting-modal');
                 alert('تم تعديل السجل المالي بنجاح!');
-            } else { alert('فشل في التعديل، يرجى التحقق من الخادم.'); }
-        } catch (err) { alert("خطأ في الاتصال بالخادم"); }
+            } else { throw new Error(result.message); }
+        } catch (err) {
+            console.error("Error editing accounting:", err);
+            alert("خطأ في الحفظ.");
+        }
     }
 });
 
 async function deleteSubject(id) {
     if (confirm('هل أنت متأكد من حذف هذه المادة الدراسية نهائياً؟')) {
         try {
-            const res = await fetch(`${API_BASE}/subjects/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                subjectsData = subjectsData.filter(s => s.id !== id);
+            const res = await fetch(`api.php?endpoint=subjects/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
                 renderSubjects();
             } else {
-                const errorData = await res.json();
-                alert(errorData.message || 'حدث خطأ أثناء الحذف من الخادم.');
+                throw new Error(result.message);
             }
         } catch (e) {
-            alert('خطأ في الاتصال بالخادم.');
+            console.error("Error deleting subject:", e);
+            alert('خطأ في الحذف.');
         }
     }
 }
 
-function renderFinancialStudents() {
+let currentAccStudentsPage = 1;
+const accStudentsPerPage = 50;
+
+function renderFinancialStudents(page = 1) {
     const tbody = document.getElementById("accounting-students-table-body");
     if (!tbody) return;
 
     // عرض الأحدث أولاً
     const sortedStudents = [...studentsData].reverse();
+    const totalPages = Math.ceil(sortedStudents.length / accStudentsPerPage) || 1;
+    if (page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    currentAccStudentsPage = page;
 
-    tbody.innerHTML = sortedStudents.map(s => {
+    const startIdx = (page - 1) * accStudentsPerPage;
+    const endIdx = startIdx + accStudentsPerPage;
+    const paginatedData = sortedStudents.slice(startIdx, endIdx);
+
+    tbody.innerHTML = paginatedData.map(s => {
         let className = "غير محدد";
         if (s.class_id) {
             const cls = coursesData.find(c => c.id === s.class_id);
@@ -2152,6 +2806,24 @@ function renderFinancialStudents() {
             </tr>
         `;
     }).join('');
+
+    let paginationContainer = document.getElementById("acc-students-pagination");
+    if (!paginationContainer) {
+        const tableContainer = tbody.closest('.table-responsive');
+        if (tableContainer && tableContainer.parentNode) {
+            paginationContainer = document.createElement("div");
+            paginationContainer.id = "acc-students-pagination";
+            paginationContainer.style = "display: flex; justify-content: center; gap: 10px; margin-top: 15px; align-items: center;";
+            tableContainer.parentNode.insertBefore(paginationContainer, tableContainer.nextSibling);
+        }
+    }
+    if (paginationContainer) {
+        paginationContainer.innerHTML = `
+            <button class="btn" onclick="renderFinancialStudents(${currentAccStudentsPage - 1})" ${currentAccStudentsPage === 1 ? 'disabled' : ''}>السابق</button>
+            <span style="font-weight: bold; margin: 0 10px;">صفحة ${currentAccStudentsPage} من ${totalPages}</span>
+            <button class="btn" onclick="renderFinancialStudents(${currentAccStudentsPage + 1})" ${currentAccStudentsPage === totalPages ? 'disabled' : ''}>التالي</button>
+        `;
+    }
 }
 
 function renderAccounting() {
@@ -2271,11 +2943,17 @@ function editAccounting(id) {
 async function deleteAccounting(id) {
     if (confirm('هل أنت متأكد من حذف هذا السجل المالي نهائياً؟')) {
         try {
-            const res = await fetch(`${API_BASE}/accounting/${id}`, { method: 'DELETE' });
-            if (res.ok) {
+            const res = await fetch(`api.php?endpoint=accounting/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
                 await loadDataFromDB();
-            } else { alert('حدث خطأ أثناء الحذف من الخادم.'); }
-        } catch (e) { alert('خطأ في الاتصال بالخادم.'); }
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (e) {
+            console.error("Error deleting accounting:", e);
+            alert('خطأ في الحذف.');
+        }
     }
 }
 
@@ -2367,6 +3045,11 @@ function renderAccountingStats() {
     const elTotalIncome = document.getElementById('acc-total-income');
     const elTotalPending = document.getElementById('acc-total-pending');
     
+    // عناصر الكروت التراكمية في لوحة التحكم
+    const elDashExpected = document.getElementById('dash-total-expected');
+    const elDashLate = document.getElementById('dash-total-late');
+    const elDashCollected = document.getElementById('dash-total-collected');
+
     // عناصر الكروت الدورية الجديدة
     const elWeeklyRev = document.getElementById('acc-weekly-rev');
     const elWeeklyExp = document.getElementById('acc-weekly-exp');
@@ -2379,8 +3062,14 @@ function renderAccountingStats() {
     if (elMonthlyExp) elMonthlyExp.textContent = formatMoney(monthlyExp);
 
     if (elExpected) elExpected.textContent = formatMoney(totalExpected);
+    if (elDashExpected) elDashExpected.textContent = formatMoney(totalExpected);
+
     if (elLate) elLate.textContent = formatMoney(totalLate);
+    if (elDashLate) elDashLate.textContent = formatMoney(totalLate);
+
     if (elCollected) elCollected.textContent = formatMoney(totalCollected);
+    if (elDashCollected) elDashCollected.textContent = formatMoney(totalCollected);
+
     if (elTotalIncome) elTotalIncome.textContent = formatMoney(totalCollected);
     if (elTotalPending) elTotalPending.textContent = formatMoney(totalLate);
 }
@@ -2549,7 +3238,9 @@ function printFinancialReport(type) {
     const printStyles = `
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-            body { font-family: 'Cairo', sans-serif; direction: rtl; color: #1f2937; background: #fff; margin: 0; padding: 0; }
+            @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap');
+            body { font-family: 'Public Sans', 'Tajawal', sans-serif; direction: rtl; color: #1f2937; background: #fff; margin: 0; padding: 0; }
+            h1, h2, h3, .section-title { font-family: 'Cairo', sans-serif; }
             .report-container { max-width: 1000px; margin: 0 auto; padding: 20px; }
             .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #4f46e5; padding-bottom: 20px; margin-bottom: 30px; }
             .header-logo { max-height: 70px; object-fit: contain; }
@@ -2667,6 +3358,7 @@ function renderNotifications() {
     const notifList = document.getElementById('notif-list');
     const parentNotifList = document.getElementById('parent-notifications-list');
     const teacherNotifList = document.getElementById('teacher-notifications-list');
+    const adminNotifList = document.getElementById('admin-notifications-list');
 
     let userNotifs = [...notificationsData];
 
@@ -2689,7 +3381,7 @@ function renderNotifications() {
             }).filter(Boolean);
 
             userNotifs = userNotifs.filter(n => 
-                n.target === 'الجميع' || n.target === 'الطلاب' || 
+                n.target === 'الجميع' || n.target === 'الطلاب' || n.target === 'أولياء الأمور' ||
                 childrenClasses.includes(n.target) || childrenNames.includes(n.target)
             );
         }
@@ -2704,11 +3396,24 @@ function renderNotifications() {
         if (notifList) notifList.innerHTML = noDropdownHtml;
         if (parentNotifList) parentNotifList.innerHTML = noNotifsHtml;
         if (teacherNotifList) teacherNotifList.innerHTML = noNotifsHtml;
+        if (adminNotifList) adminNotifList.innerHTML = noNotifsHtml;
         return;
     }
 
-    // Sort by newest first
-    const sortedNotifs = userNotifs.reverse();
+    // الإشعارات تأتي مرتبة من قاعدة البيانات (الأحدث أولاً)، لذا لا حاجة لعكسها
+    const sortedNotifs = userNotifs;
+
+    // Play sound alert for new notifications
+    if (sortedNotifs.length > 0) {
+        const latestNotif = sortedNotifs[0];
+        if (lastSeenNotificationId !== null && lastSeenNotificationId !== latestNotif.id) {
+            try {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.log("Audio play blocked by browser:", e));
+            } catch (e) { }
+        }
+        lastSeenNotificationId = latestNotif.id;
+    }
 
     // Render for dropdown
     if (notifList) {
@@ -2729,13 +3434,20 @@ function renderNotifications() {
     if (parentNotifList) {
         parentNotifList.innerHTML = '';
         // Only show up to 5 recent notifications on the dashboard for cleaner UI
-        sortedNotifs.slice(0, 5).forEach(notif => {
+        sortedNotifs.slice(0, 5).forEach((notif, index) => {
             const item = document.createElement('div');
             item.style.padding = '15px';
             item.style.borderBottom = '1px solid var(--border-color)';
             item.style.cursor = 'default'; // explicitly default
+            
+            const isNewest = index === 0;
+            if (isNewest) {
+                item.style.backgroundColor = 'rgba(79, 70, 229, 0.05)';
+                item.style.borderLeft = '4px solid var(--primary-color)';
+            }
+
             item.innerHTML = `
-            <div style="font-weight: 700; color: var(--text-main); margin-bottom: 5px;">${notif.title}</div>
+            <div style="font-weight: 700; color: var(--text-main); margin-bottom: 5px;">${notif.title} <span class="badge" style="background:var(--primary-color);font-size:10px;padding:2px 6px;float:left;">${notif.target}</span> ${isNewest ? '<span class="badge" style="background:var(--danger-color);font-size:10px;padding:2px 6px;float:left;margin-left:5px;">جديد</span>' : ''}</div>
             <div style="font-size: 14px; color: var(--text-muted); line-height: 1.4;">${notif.message}</div>
             <div style="font-size: 12px; color: var(--text-light); margin-top: 8px;"><i class='bx bx-time-five'></i> ${notif.date}</div>
         `;
@@ -2765,14 +3477,47 @@ function renderNotifications() {
             teacherNotifList.lastChild.style.borderBottom = 'none';
         }
     }
+
+    // Render for admin dashboard
+    if (adminNotifList) {
+        adminNotifList.innerHTML = '';
+        sortedNotifs.slice(0, 5).forEach(notif => {
+            const item = document.createElement('div');
+            item.style.padding = '15px';
+            item.style.borderBottom = '1px solid var(--border-color)';
+            item.style.cursor = 'default';
+            item.innerHTML = `
+            <div style="font-weight: 700; color: var(--text-main); margin-bottom: 5px;">${notif.title} <span class="badge" style="background:var(--primary-color);font-size:10px;padding:2px 6px;float:left;">${notif.target}</span></div>
+            <div style="font-size: 14px; color: var(--text-muted); line-height: 1.4;">${notif.message}</div>
+            <div style="font-size: 12px; color: var(--text-light); margin-top: 8px;"><i class='bx bx-time-five'></i> ${notif.date}</div>
+        `;
+            adminNotifList.appendChild(item);
+        });
+        if (adminNotifList.lastChild) {
+            adminNotifList.lastChild.style.borderBottom = 'none';
+        }
+    }
 }
 
 // === Teacher Views Logic ===
 function renderTeacherViews() {
     if (!currentUser || currentUser.roleCode !== 'teacher') return;
 
-    // استخراج الشعب الخاصة بالمعلم
-    const teacherClasses = coursesData.filter(c => c.instructor === currentUser.name && (c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة')));
+    // Show Teacher Topbar Info
+    const topbarUserInfo = document.getElementById("topbar-user-info");
+    if (topbarUserInfo) {
+        const inst = instructorsData.find(i => i.name === currentUser.name);
+        const subjectName = inst ? inst.spec : '';
+        topbarUserInfo.style.display = 'block';
+        if (subjectName) {
+            topbarUserInfo.innerHTML = `المدرس: <span style="color: var(--text-color);">${currentUser.name}</span> &nbsp;|&nbsp; المادة: <span style="color: var(--text-color);">${subjectName}</span>`;
+        } else {
+            topbarUserInfo.innerHTML = `المدرس: <span style="color: var(--text-color);">${currentUser.name}</span>`;
+        }
+    }
+
+    // استخراج الشعب والصفوف الخاصة بالمعلم
+    const teacherClasses = coursesData.filter(c => c.instructor === currentUser.name);
     const teacherClassIds = teacherClasses.map(c => c.id);
 
     // استخراج الطلاب المسجلين في هذه الشعب حصراً
@@ -2813,6 +3558,16 @@ function renderTeacherViews() {
         attClassSelect.innerHTML = '<option value="">-- اختر الشعبة --</option>' + teacherClasses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
         if (currentVal && teacherClassIds.includes(currentVal)) {
             attClassSelect.value = currentVal;
+        }
+    }
+
+    // تحديث القائمة المنسدلة في صفحة الدرجات
+    const gradesClassSelect = document.getElementById('grades-class-select');
+    if (gradesClassSelect) {
+        const currentVal = gradesClassSelect.value;
+        gradesClassSelect.innerHTML = '<option value="">-- اختر الشعبة --</option>' + teacherClasses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+        if (currentVal && teacherClassIds.includes(currentVal)) {
+            gradesClassSelect.value = currentVal;
         }
     }
 
@@ -2866,6 +3621,7 @@ function renderTeacherViews() {
                     </td>
                     <td>${s.course}</td>
                     <td><span class="badge" style="background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color);">${className}</span></td>
+                    <td><span class="status-badge status-${s.statusCode}">${s.status}</span></td>
                     <td>${s.date}</td>
                     <td>
                         <button class="btn-icon" title="عرض التفاصيل" onclick="alert('سيتم تفعيل عرض تفاصيل الطالب قريباً')" style="color: var(--primary-color);"><i class='bx bx-show'></i></button>
@@ -2886,6 +3642,39 @@ function renderTeacherViews() {
     if (searchInput && !searchInput.dataset.listener) {
         searchInput.addEventListener('input', renderStudentsTable);
         searchInput.dataset.listener = "true";
+    }
+
+    // === Render Teacher Schedule ===
+    const teacherScheduleTbody = document.getElementById('teacher-schedule-tbody');
+    if (teacherScheduleTbody) {
+        const tSchedule = scheduleData.filter(s => s.instructor_name === currentUser.name);
+        tSchedule.sort((a, b) => {
+            if (daysOrder[a.day_of_week] !== daysOrder[b.day_of_week]) {
+                return daysOrder[a.day_of_week] - daysOrder[b.day_of_week];
+            }
+            return a.start_time.localeCompare(b.start_time);
+        });
+
+        if (tSchedule.length === 0) {
+            teacherScheduleTbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--text-muted);">لا يوجد جدول متاح حالياً</td></tr>';
+        } else {
+            teacherScheduleTbody.innerHTML = tSchedule.map(s => {
+                const cls = coursesData.find(c => c.id === s.class_id);
+                const formatTime = (time) => {
+                    if (!time) return ''; let [h, m] = time.split(':'); h = parseInt(h);
+                    const ampm = h >= 12 ? 'م' : 'ص'; h = h % 12 || 12; return `${h}:${m} ${ampm}`;
+                };
+                const badgeStyle = getBadgeStyleForId(s.class_id);
+                return `
+                    <tr>
+                        <td style="font-weight: bold; color: var(--primary-color);">${s.day_of_week}</td>
+                        <td dir="ltr" style="text-align: right; font-weight: 500;">${formatTime(s.start_time)} - ${formatTime(s.end_time)}</td>
+                        <td><span class="badge" style="${badgeStyle}">${cls ? cls.title : '-'}</span></td>
+                        <td>${s.room || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
     }
 }
 
@@ -2924,6 +3713,7 @@ function renderParentViews() {
         const presentCount = childAttendance.filter(a => a.status === 'present').length;
         const absentCount = childAttendance.filter(a => a.status === 'absent').length;
         const excusedCount = childAttendance.filter(a => a.status === 'excused').length;
+        const childGrades = gradesData.filter(g => g.student_id === child.id);
 
         return `
         <div class="card mb-4" style="border-right: 4px solid var(--primary-color); box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
@@ -2978,10 +3768,184 @@ function renderParentViews() {
                     </table>
                 </div>
                 ` : `<p style="text-align: center; color: var(--text-muted); font-size: 14px; padding: 20px; background: var(--bg-hover); border-radius: 8px;">لا توجد سجلات حضور وغياب حالياً.</p>`}
+                
+                <!-- سجل الامتحانات ومستوى الطالب -->
+                <h4 style="margin-top: 30px; margin-bottom: 15px; font-size: 15px; border-bottom: 2px solid var(--bg-hover); padding-bottom: 8px; display: flex; align-items: center; gap: 8px; color: var(--text-main);">
+                    <i class='bx bx-medal' style="font-size: 20px; color: #f59e0b;"></i>
+                    سجل الدرجات
+                </h4>
+                <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <table class="data-table" style="font-size: 13px; margin: 0; border-radius: 0;">
+                        <thead style="background: var(--bg-hover);">
+                            <tr>
+                                <th>الدورة / الشعبة</th>
+                                <th style="text-align: center;">الامتحان الأول</th>
+                                <th style="text-align: center;">الامتحان الثاني</th>
+                                <th style="text-align: center;">الامتحان الثالث</th>
+                                <th style="text-align: center;">الامتحان الرابع</th>
+                                <th style="text-align: center;">المجموع</th>
+                                <th>الملاحظات</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${childGrades.length > 0 ? childGrades.map(g => {
+                                const cls = coursesData.find(c => c.id === g.class_id);
+                                const className = cls ? cls.title : 'غير محدد';
+                                const w1 = parseFloat(g.week1) || 0;
+                                const w2 = parseFloat(g.week2) || 0;
+                                const w3 = parseFloat(g.week3) || 0;
+                                const w4 = parseFloat(g.week4) || 0;
+                                const total = w1 + w2 + w3 + w4;
+                                const hasGrades = g.week1 !== '' || g.week2 !== '' || g.week3 !== '' || g.week4 !== '';
+                                
+                                return `<tr>
+                                    <td style="font-weight: 600;">${className}</td>
+                                    <td style="text-align: center;">${g.week1 !== '' ? g.week1 : '-'}</td>
+                                    <td style="text-align: center;">${g.week2 !== '' ? g.week2 : '-'}</td>
+                                    <td style="text-align: center;">${g.week3 !== '' ? g.week3 : '-'}</td>
+                                    <td style="text-align: center;">${g.week4 !== '' ? g.week4 : '-'}</td>
+                                    <td style="text-align: center; font-weight: bold; color: var(--primary-color);">${hasGrades ? total : '-'}</td>
+                                    <td>${g.notes || '-'}</td>
+                                </tr>`;
+                            }).join('') : `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">لا توجد درجات مسجلة حالياً لهذا الطالب.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
         `;
     }).join('');
+
+    // === Render Parent Schedule ===
+    const parentScheduleTbody = document.getElementById('parent-schedule-tbody');
+    if (parentScheduleTbody) {
+        let pSchedule = [];
+        children.forEach(child => {
+            if (child.class_id) {
+                const childSch = scheduleData.filter(s => s.class_id === child.class_id).map(s => ({...s, studentName: child.name}));
+                pSchedule = pSchedule.concat(childSch);
+            }
+        });
+
+        pSchedule.sort((a, b) => {
+            if (daysOrder[a.day_of_week] !== daysOrder[b.day_of_week]) {
+                return daysOrder[a.day_of_week] - daysOrder[b.day_of_week];
+            }
+            return a.start_time.localeCompare(b.start_time);
+        });
+
+        if (pSchedule.length === 0) {
+            parentScheduleTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-muted);">لا توجد جداول متاحة حالياً</td></tr>';
+        } else {
+            parentScheduleTbody.innerHTML = pSchedule.map(s => {
+                const cls = coursesData.find(c => c.id === s.class_id);
+                const formatTime = (time) => {
+                    if (!time) return ''; let [h, m] = time.split(':'); h = parseInt(h);
+                    const ampm = h >= 12 ? 'م' : 'ص'; h = h % 12 || 12; return `${h}:${m} ${ampm}`;
+                };
+                const badgeStyle = getBadgeStyleForId(s.class_id);
+                return `
+                    <tr>
+                        <td style="font-weight: 600;"><i class='bx bx-user' style="color: var(--text-muted);"></i> ${s.studentName}</td>
+                        <td style="font-weight: bold; color: var(--primary-color);">${s.day_of_week}</td>
+                        <td dir="ltr" style="text-align: right; font-weight: 500;">${formatTime(s.start_time)} - ${formatTime(s.end_time)}</td>
+                        <td><span class="badge" style="${badgeStyle}">${cls ? cls.title : '-'}</span></td>
+                        <td>${s.room || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    }
+
+    // === Render Parent Fees ===
+    const feesContainer = document.getElementById('parent-fees-content');
+    if (feesContainer) {
+        if (children.length === 0) {
+            feesContainer.innerHTML = `
+                <div class="card">
+                    <div class="card-body" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        <i class='bx bx-wallet' style="font-size: 48px; color: var(--primary-color); margin-bottom: 15px;"></i>
+                        <h3>لا توجد بيانات مالية أو رسوم مسجلة للعرض</h3>
+                    </div>
+                </div>`;
+        } else {
+            let totalRemaining = 0;
+            let feesHtml = `
+            <div class="card mb-4" style="border-top: 4px solid var(--primary-color); overflow: hidden;">
+                <div class="card-header" style="background: rgba(79, 70, 229, 0.05); padding: 20px;">
+                    <h3 style="color: var(--primary-color); margin: 0; display: flex; align-items: center; gap: 10px;">
+                        <i class='bx bx-wallet-alt' style="font-size: 24px;"></i>
+                        ملخص الرسوم الدراسية
+                    </h3>
+                </div>
+                <div class="card-body" style="padding: 0;">
+                    <div class="table-responsive">
+                        <table class="data-table" style="margin: 0; border-radius: 0;">
+                            <thead>
+                                <tr style="background: var(--bg-hover);">
+                                    <th>اسم الطالب</th>
+                                    <th>الدورة</th>
+                                    <th>المبلغ الكلي</th>
+                                    <th>المدفوع</th>
+                                    <th>المتبقي (الديون)</th>
+                                    <th>الحالة</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            children.forEach(child => {
+                const r = parseFloat(child.balance ? child.balance.replace(/[^\d.-]/g, '') : 0) || 0;
+                totalRemaining += r;
+                const isDebt = r > 0;
+                
+                feesHtml += `
+                    <tr>
+                        <td style="font-weight: 600;">${child.name}</td>
+                        <td>${child.course}</td>
+                        <td>${child.total || '0'}</td>
+                        <td style="color: var(--primary-color); font-weight: bold;">${child.paid || '0'}</td>
+                        <td style="color: ${isDebt ? 'var(--danger-color)' : 'inherit'}; font-weight: bold;">${child.balance || '0'}</td>
+                        <td><span class="status-badge status-${child.statusCode}">${child.status}</span></td>
+                    </tr>
+                `;
+            });
+
+            feesHtml += `</tbody></table></div></div></div>`;
+
+            // Payment History (Accounting Data)
+            const childrenNames = children.map(c => c.name);
+            const parentReceipts = accountingData.filter(a => childrenNames.some(name => a.student.includes(name)));
+
+            if (parentReceipts.length > 0) {
+                feesHtml += `
+                <div class="card" style="border-top: 4px solid #10b981; overflow: hidden;">
+                    <div class="card-header" style="background: rgba(16, 185, 129, 0.05); padding: 20px;">
+                        <h3 style="color: #10b981; margin: 0; display: flex; align-items: center; gap: 10px;">
+                            <i class='bx bx-receipt' style="font-size: 24px;"></i>
+                            سجل الإيصالات والدفعات المؤكدة
+                        </h3>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="table-responsive">
+                            <table class="data-table" style="margin: 0; border-radius: 0;">
+                                <thead><tr style="background: var(--bg-hover);"><th>رقم الإيصال</th><th>البيان</th><th>التاريخ</th><th>المبلغ</th><th>الحالة</th></tr></thead>
+                                <tbody>
+                                    ${parentReceipts.sort((a, b) => b.id.localeCompare(a.id)).map(acc => `
+                                        <tr><td style="font-weight: bold;">${acc.receipt || '-'}</td><td>${acc.student}</td><td>${acc.date}</td><td dir="ltr" style="text-align: right; color: #10b981; font-weight: bold;">${acc.amount}</td><td><span class="status-badge status-${acc.statusCode}">${acc.status}</span></td></tr>
+                                    `).join('')}
+                                </tbody></table></div></div></div>`;
+            }
+
+            feesContainer.innerHTML = feesHtml;
+
+            const parentFeesStatEl = document.getElementById('parent-total-debt');
+            if (parentFeesStatEl) {
+                const currency = settingsData.currency || 'دينار';
+                parentFeesStatEl.textContent = `${totalRemaining.toLocaleString()} ${currency}`;
+            }
+        }
+    }
 }
 
 function goToAttendancePage(classId) {
@@ -3051,7 +4015,7 @@ function loadClassAttendance() {
     }).join('');
 }
 
-function savePageAttendance() {
+async function savePageAttendance() {
     const classId = document.getElementById('attendance-page-class-select').value;
     const date = document.getElementById('attendance-page-date').value;
     
@@ -3093,53 +4057,551 @@ function savePageAttendance() {
         records: attendanceRecords
     };
 
-    fetch(`${API_BASE}/attendance`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-        .then(res => res.json())
-        .then(async data => {
-            if (data.success) { 
-                // إرسال إشعارات غياب للطلاب المتغيبين
-                const newNotifs = [];
-                absentStudents.forEach((student, index) => {
-                    const message = `تم تسجيل غياب للطالب ${student.name} بتاريخ ${date}.`;
-                    const exists = notificationsData.some(n => n.target === 'طالب: ' + student.name && n.message.includes(date));
-                    if (!exists) {
-                        newNotifs.push({
-                            id: 'N-' + Date.now() + index,
-                            title: 'إشعار غياب',
-                            target: 'طالب: ' + student.name,
-                            message: message + ` يرجى متابعة الأمر.`,
-                            date: new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())
-                        });
-                    }
-                });
-                
-                if (newNotifs.length > 0) {
-                    notificationsData.push(...newNotifs);
-                    await fetch(`${API_BASE}/update/notifications`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(notificationsData)
-                    });
-                }
+    try {
+        const res = await fetch('api.php?endpoint=attendance', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const result = await res.json();
+        if (!result.success) throw new Error(result.message);
 
-                alert('تم حفظ سجل التحضير بنجاح!'); 
-                await loadDataFromDB(); // لتحديث البيانات وعرضها فوراً عند ولي الأمر
-                loadClassAttendance();
+        // إرسال إشعارات غياب للطلاب المتغيبين
+        const newNotifs = [];
+        absentStudents.forEach((student, index) => {
+            const message = `تم تسجيل غياب للطالب ${student.name} بتاريخ ${date}.`;
+            // التحقق من وجود إشعار مماثل (اختياري)
+            newNotifs.push({
+                id: 'N-' + Date.now() + index,
+                title: 'إشعار غياب',
+                target: 'طالب: ' + student.name,
+                message: message + ` يرجى متابعة الأمر.`,
+                date: new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())
+            });
+        });
+        
+        if (newNotifs.length > 0) {
+            await fetch('api.php?endpoint=update/notifications', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(newNotifs) });
+        }
+
+        alert('تم حفظ سجل التحضير بنجاح!'); 
+        await loadDataFromDB();
+        loadClassAttendance();
+    } catch (err) {
+        console.error("Error saving attendance:", err);
+        alert('تعذر الحفظ: ' + err.message);
+    }
+}
+
+// === وظائف صفحة الدرجات ===
+function loadClassGrades() {
+    const classId = document.getElementById('grades-class-select')?.value;
+    const tbody = document.getElementById('grades-students-list');
+
+    if (!tbody) return;
+
+    if (!classId) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 30px; color: var(--text-muted);">الرجاء تحديد شعبة أولاً</td></tr>';
+        return;
+    }
+
+    const classStudents = studentsData.filter(s => s.class_id === classId);
+    if (classStudents.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 30px; color: var(--text-muted);">لا يوجد طلاب مسجلين في هذه الشعبة</td></tr>';
+        return;
+    }
+
+    const cls = coursesData.find(c => c.id === classId);
+    const className = cls ? cls.title : 'غير محدد';
+
+    tbody.innerHTML = classStudents.map(s => {
+        // Find existing grade for student in this class, or create defaults
+        const eg = gradesData.find(g => g.student_id === s.id && g.class_id === classId) || { id: '', week1: '', week2: '', week3: '', week4: '', notes: '' };
+        
+        const w1 = parseFloat(eg.week1) || 0;
+        const w2 = parseFloat(eg.week2) || 0;
+        const w3 = parseFloat(eg.week3) || 0;
+        const w4 = parseFloat(eg.week4) || 0;
+        const total = w1 + w2 + w3 + w4;
+        const hasGrades = eg.week1 !== '' || eg.week2 !== '' || eg.week3 !== '' || eg.week4 !== '';
+
+        return `
+            <tr data-student-id="${s.id}" data-grade-id="${eg.id}">
+                <td style="font-weight: 600;">${s.name}</td>
+                <td><span class="badge" style="background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color);">${className}</span></td>
+                <td>${eg.week1 !== '' ? eg.week1 : '-'}</td>
+                <td>${eg.week2 !== '' ? eg.week2 : '-'}</td>
+                <td>${eg.week3 !== '' ? eg.week3 : '-'}</td>
+                <td>${eg.week4 !== '' ? eg.week4 : '-'}</td>
+                <td style="font-weight: bold; color: var(--primary-color);">${hasGrades ? total : '-'}</td>
+                <td>
+                    ${eg.notes || '-'}
+                </td>
+                <td>
+                    <button class="btn-icon" style="color: var(--primary-color);" title="تعديل" onclick="editGrade('${s.id}', '${classId}')"><i class='bx bx-edit'></i></button>
+                    ${eg.id ? `<button class="btn-icon" style="color: var(--danger-color);" title="حذف" onclick="deleteGrade('${eg.id}')"><i class='bx bx-trash'></i></button>` : ''}
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function editGrade(studentId, classId) {
+    const eg = gradesData.find(g => g.student_id === studentId && g.class_id === classId) || { week1: '', week2: '', week3: '', week4: '', notes: '' };
+    
+    openModal('add-grade-modal');
+    
+    const classSelect = document.getElementById('gradeModalClass');
+    if (classSelect) classSelect.value = classId;
+    
+    filterStudentsForGradeModal();
+    
+    const studentSelect = document.getElementById('gradeModalStudent');
+    if (studentSelect) studentSelect.value = studentId;
+    
+    document.getElementById('gradeModalW1').value = eg.week1;
+    document.getElementById('gradeModalW2').value = eg.week2;
+    document.getElementById('gradeModalW3').value = eg.week3;
+    document.getElementById('gradeModalW4').value = eg.week4;
+    document.getElementById('gradeModalNotes').value = eg.notes || '';
+}
+
+async function deleteGrade(id) {
+    if (confirm('هل أنت متأكد من حذف درجات هذا الطالب؟')) {
+        try {
+            const res = await fetch(`api.php?endpoint=grades/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                loadClassGrades();
+            } else {
+                throw new Error(result.message);
             }
-            else { alert(data.error || 'فشل في حفظ البيانات، يرجى التحقق من الخادم.'); }
-    })
-    .catch(err => { alert('تعذر الاتصال بالخادم.'); console.error(err); });
+        } catch (e) {
+            console.error("Error deleting grade:", e);
+            alert('خطأ في الحذف');
+        }
+    }
+}
+
+function filterClassesForSchedule() {
+    const courseId = document.getElementById('scheduleCourse')?.value;
+    const classSelect = document.getElementById('scheduleClass');
+    if (!courseId || !classSelect) return;
+    
+    const course = coursesData.find(c => c.id === courseId);
+    if (!course) {
+        classSelect.innerHTML = '<option value="">-- حدد الدورة أولاً --</option>';
+        document.getElementById('scheduleInstructor').value = '';
+        return;
+    }
+
+    const classesList = coursesData;
+    const filteredClasses = classesList.filter(c => c.subject === course.subject);
+
+    if (filteredClasses.length > 0) {
+        classSelect.innerHTML = `<option value="">-- حدد الشعبة --</option>` + filteredClasses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    } else {
+        classSelect.innerHTML = `<option value="">-- لا توجد شعب متاحة لهذه الدورة/المادة --</option>`;
+    }
+
+    const instructorSelect = document.getElementById('scheduleInstructor');
+    if (instructorSelect) {
+        let optionsHTML = `<option value="">-- اختر المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+        
+        // تحديد المدرس المرتبط بالدورة تلقائياً وضمان وجوده في القائمة
+        if (course.instructor && course.instructor !== 'غير محدد') {
+            // إذا لم يكن المدرس موجوداً في القائمة الحالية، قم بإضافته كخيار ليتمكن المتصفح من تحديده
+            if (!instructorsData.some(i => i.name === course.instructor)) {
+                optionsHTML += `<option value="${course.instructor}">${course.instructor}</option>`;
+            }
+        }
+            
+            // إضافة خيار الانتقال إلى صفحة المدرسين في نهاية القائمة
+            optionsHTML += `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+            
+            instructorSelect.innerHTML = optionsHTML;
+            if (course.instructor && course.instructor !== 'غير محدد') {
+                instructorSelect.value = course.instructor;
+            } else {
+                instructorSelect.value = '';
+            }
+    }
+}
+
+// دالة لتعبئة حقل المدرس تلقائياً عند اختيار شعبة
+function autoFillInstructorForSchedule() {
+    const classId = document.getElementById('scheduleClass')?.value;
+    const courseId = document.getElementById('scheduleCourse')?.value;
+    const instructorInput = document.getElementById('scheduleInstructor');
+    if (!courseId || !instructorInput) {
+        return;
+    }
+
+    const appendInstructor = (instName) => {
+        if (!Array.from(instructorInput.options).some(opt => opt.value === instName)) {
+            const newOpt = document.createElement('option');
+            newOpt.value = instName;
+            newOpt.textContent = instName;
+            const lastOpt = instructorInput.lastElementChild;
+            if (lastOpt && lastOpt.value === 'GOTO_INSTRUCTORS') {
+                instructorInput.insertBefore(newOpt, lastOpt);
+            } else {
+                instructorInput.appendChild(newOpt);
+            }
+        }
+        instructorInput.value = instName;
+    };
+
+    const cls = coursesData.find(c => c.id === classId);
+    if (cls && cls.instructor && cls.instructor !== 'غير محدد') {
+        appendInstructor(cls.instructor);
+    } else {
+        // إذا تم إلغاء تحديد الشعبة، نعود لمدرس الدورة الأساسي
+        const crs = coursesData.find(c => c.id === courseId);
+        if (crs && crs.instructor && crs.instructor !== 'غير محدد') {
+            appendInstructor(crs.instructor);
+        } else {
+            instructorInput.value = '';
+        }
+    }
+}
+
+
+// === Badge Color Generator based on ID ===
+const badgeColors = [
+    { bg: '#fee2e2', text: '#be123c', border: '#fda4af' }, // Red/Rose
+    { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' }, // Emerald
+    { bg: '#e0e7ff', text: '#4338ca', border: '#a5b4fc' }, // Indigo
+    { bg: '#fef3c7', text: '#b45309', border: '#fcd34d' }, // Amber
+    { bg: '#fce7f3', text: '#be185d', border: '#f9a8d4' }, // Pink
+    { bg: '#e0f2fe', text: '#0369a1', border: '#7dd3fc' }, // Light Blue
+    { bg: '#f3e8ff', text: '#7e22ce', border: '#d8b4fe' }, // Purple
+    { bg: '#ffedd5', text: '#c2410c', border: '#fdba74' }  // Orange
+];
+
+function getBadgeStyleForId(idString) {
+    if (!idString) return `background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color);`;
+    let hash = 0;
+    for (let i = 0; i < idString.length; i++) {
+        hash = idString.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % badgeColors.length;
+    const theme = badgeColors[index];
+    return `background: ${theme.bg}; color: ${theme.text}; border: 1px solid ${theme.border}; font-weight: 600;`;
+}
+
+const daysOrder = { 'السبت': 1, 'الأحد': 2, 'الإثنين': 3, 'الثلاثاء': 4, 'الأربعاء': 5, 'الخميس': 6, 'الجمعة': 7 };
+
+function renderSchedule() {
+    const tbody = document.getElementById('schedule-table-body');
+    const classFilter = document.getElementById('schedule-class-filter');
+    const instFilter = document.getElementById('schedule-instructor-filter');
+    
+    if (classFilter && classFilter.options.length <= 1) {
+        const classes = coursesData.filter(c => c.duration === 'غير محدد' || c.title.includes(' - نسخة جديدة'));
+        classFilter.innerHTML = '<option value="all">جميع الشعب</option>' + classes.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    }
+    if (instFilter && instFilter.options.length <= 1) {
+        instFilter.innerHTML = '<option value="all">جميع المدرسين</option>' + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+    }
+
+    if (!tbody) return;
+
+    const selClass = classFilter ? classFilter.value : 'all';
+    const selInst = instFilter ? instFilter.value : 'all';
+    const searchTerm = (document.getElementById('schedule-search')?.value || '').toLowerCase();
+
+    let filtered = scheduleData.filter(s => {
+        const matchClass = selClass === 'all' || s.class_id === selClass;
+        const matchInst = selInst === 'all' || s.instructor_name === selInst;
+        
+        const crs = coursesData.find(c => c.id === s.course_id);
+        const crsName = crs ? crs.title.toLowerCase() : '';
+        const roomMatch = s.room ? s.room.toLowerCase() : '';
+        
+        const matchSearch = !searchTerm || 
+            s.instructor_name.toLowerCase().includes(searchTerm) || 
+            crsName.includes(searchTerm) || 
+            roomMatch.includes(searchTerm) ||
+            s.day_of_week.includes(searchTerm);
+            
+        return matchClass && matchInst && matchSearch;
+    });
+
+    filtered.sort((a, b) => {
+        if (daysOrder[a.day_of_week] !== daysOrder[b.day_of_week]) {
+            return daysOrder[a.day_of_week] - daysOrder[b.day_of_week];
+        }
+        return a.start_time.localeCompare(b.start_time);
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px;">لا توجد مواعيد مضافة</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(s => {
+        const crs = coursesData.find(c => c.id === s.course_id);
+        const cls = coursesData.find(c => c.id === s.class_id);
+        const crsName = crs ? crs.title : '-';
+        const clsName = cls ? cls.title : '-';
+        
+        const formatTime = (time) => {
+            if (!time) return '';
+            let [h, m] = time.split(':');
+            h = parseInt(h);
+            const ampm = h >= 12 ? 'م' : 'ص';
+            h = h % 12 || 12;
+            return `${h}:${m} ${ampm}`;
+        };
+        
+        const badgeStyle = getBadgeStyleForId(s.class_id);
+
+        return `
+            <tr>
+                <td style="font-weight: bold; color: var(--primary-color);">${s.day_of_week}</td>
+                <td dir="ltr" style="text-align: right; font-weight: 500;">${formatTime(s.start_time)} - ${formatTime(s.end_time)}</td>
+                <td>${crsName}</td>
+                    <td><span class="badge" style="${badgeStyle}">${clsName}</span></td>
+                    <td><i class='bx bx-user' style="color: var(--text-muted);"></i> ${s.instructor_name}</td>
+                <td>${s.room || '-'}</td>
+                <td>
+                    <button class="btn-icon" style="color: var(--primary-color);" title="تعديل" onclick="openEditScheduleModal('${s.id}')"><i class='bx bx-edit'></i></button>
+                    <button class="btn-icon" style="color: var(--danger-color);" title="حذف" onclick="deleteSchedule('${s.id}')"><i class='bx bx-trash'></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function deleteSchedule(id) {
+    if (confirm('هل أنت متأكد من حذف هذا الموعد؟')) {
+        try {
+            const res = await fetch(`api.php?endpoint=schedule/${id}`, { method: 'DELETE' });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                renderSchedule();
+            } else {
+                throw new Error(result.message);
+            }
+        } catch (e) {
+            console.error("Error deleting schedule:", e);
+            alert('خطأ في الحذف');
+        }
+    }
+}
+
+function filterClassesForEditSchedule() {
+    const courseId = document.getElementById('editScheduleCourse')?.value;
+    const classSelect = document.getElementById('editScheduleClass');
+    if (!courseId || !classSelect) return;
+    
+    const course = coursesData.find(c => c.id === courseId);
+    if (!course) {
+        classSelect.innerHTML = '<option value="">-- حدد الدورة أولاً --</option>';
+        document.getElementById('editScheduleInstructor').value = '';
+        return;
+    }
+
+    const classesList = coursesData;
+    const filteredClasses = classesList.filter(c => c.subject === course.subject);
+
+    if (filteredClasses.length > 0) {
+        classSelect.innerHTML = `<option value="">-- حدد الشعبة --</option>` + filteredClasses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    } else {
+        classSelect.innerHTML = `<option value="">-- لا توجد شعب متاحة لهذه الدورة/المادة --</option>`;
+    }
+
+    const instructorSelect = document.getElementById('editScheduleInstructor');
+    if (instructorSelect) {
+        let optionsHTML = `<option value="">-- اختر المدرس --</option>` + instructorsData.map(i => `<option value="${i.name}">${i.name}</option>`).join('');
+        if (course.instructor && course.instructor !== 'غير محدد') {
+            if (!instructorsData.some(i => i.name === course.instructor)) {
+                optionsHTML += `<option value="${course.instructor}">${course.instructor}</option>`;
+            }
+        }
+        optionsHTML += `<option value="GOTO_INSTRUCTORS" style="font-weight:bold; color:var(--primary-color);">➕ إضافة / إدارة المدرسين</option>`;
+        instructorSelect.innerHTML = optionsHTML;
+        if (course.instructor && course.instructor !== 'غير محدد') {
+            instructorSelect.value = course.instructor;
+        } else {
+            instructorSelect.value = '';
+        }
+    }
+}
+
+function autoFillInstructorForEditSchedule() {
+    const classId = document.getElementById('editScheduleClass')?.value;
+    const courseId = document.getElementById('editScheduleCourse')?.value;
+    const instructorInput = document.getElementById('editScheduleInstructor');
+    if (!courseId || !instructorInput) return;
+
+    const appendInstructor = (instName) => {
+        if (!Array.from(instructorInput.options).some(opt => opt.value === instName)) {
+            const newOpt = document.createElement('option');
+            newOpt.value = instName;
+            newOpt.textContent = instName;
+            const lastOpt = instructorInput.lastElementChild;
+            if (lastOpt && lastOpt.value === 'GOTO_INSTRUCTORS') {
+                instructorInput.insertBefore(newOpt, lastOpt);
+            } else {
+                instructorInput.appendChild(newOpt);
+            }
+        }
+        instructorInput.value = instName;
+    };
+
+    const cls = coursesData.find(c => c.id === classId);
+    if (cls && cls.instructor && cls.instructor !== 'غير محدد') {
+        appendInstructor(cls.instructor);
+    } else {
+        const crs = coursesData.find(c => c.id === courseId);
+        if (crs && crs.instructor && crs.instructor !== 'غير محدد') {
+            appendInstructor(crs.instructor);
+        } else {
+            instructorInput.value = '';
+        }
+    }
+}
+
+function openEditScheduleModal(id) {
+    const s = scheduleData.find(sch => sch.id === id);
+    if (!s) return;
+    
+    document.getElementById('editScheduleId').value = s.id;
+    
+    // Populate Courses
+    const courseSelect = document.getElementById('editScheduleCourse');
+    const mainCourses = coursesData.filter(c => c.duration !== 'غير محدد' && !c.title.includes(' - نسخة جديدة'));
+    courseSelect.innerHTML = '<option value="">-- اختر الدورة --</option>' + mainCourses.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
+    courseSelect.value = s.course_id;
+    
+    // Populate Classes & Instructors based on Course
+    filterClassesForEditSchedule();
+    
+    // Set Class
+    document.getElementById('editScheduleClass').value = s.class_id;
+    
+    // Set Instructor
+    const instructorSelect = document.getElementById('editScheduleInstructor');
+    if (!Array.from(instructorSelect.options).some(opt => opt.value === s.instructor_name)) {
+        const newOpt = document.createElement('option');
+        newOpt.value = s.instructor_name;
+        newOpt.textContent = s.instructor_name;
+        const lastOpt = instructorSelect.lastElementChild;
+        if (lastOpt && lastOpt.value === 'GOTO_INSTRUCTORS') {
+            instructorSelect.insertBefore(newOpt, lastOpt);
+        } else {
+            instructorSelect.appendChild(newOpt);
+        }
+    }
+    instructorSelect.value = s.instructor_name;
+
+    document.getElementById('editScheduleDay').value = s.day_of_week;
+    document.getElementById('editScheduleRoom').value = s.room || '';
+    document.getElementById('editScheduleStartTime').value = s.start_time;
+    document.getElementById('editScheduleEndTime').value = s.end_time;
+    
+    openModal('edit-schedule-modal');
+}
+
+function printSchedule() {
+    const classFilter = document.getElementById('schedule-class-filter')?.options[document.getElementById('schedule-class-filter')?.selectedIndex]?.text || 'جميع الشعب';
+    const instFilter = document.getElementById('schedule-instructor-filter')?.options[document.getElementById('schedule-instructor-filter')?.selectedIndex]?.text || 'جميع المدرسين';
+    
+    const selClass = document.getElementById('schedule-class-filter')?.value || 'all';
+    const selInst = document.getElementById('schedule-instructor-filter')?.value || 'all';
+
+    let filtered = scheduleData.filter(s => {
+        const matchClass = selClass === 'all' || s.class_id === selClass;
+        const matchInst = selInst === 'all' || s.instructor_name === selInst;
+        return matchClass && matchInst;
+    });
+
+    filtered.sort((a, b) => {
+        if (daysOrder[a.day_of_week] !== daysOrder[b.day_of_week]) {
+            return daysOrder[a.day_of_week] - daysOrder[b.day_of_week];
+        }
+        return a.start_time.localeCompare(b.start_time);
+    });
+
+    let rowsHtml = '';
+    if (filtered.length === 0) {
+        rowsHtml = `<tr><td colspan="6" style="text-align: center; border: 1px solid #ddd; padding: 12px;">لا توجد مواعيد متاحة للطباعة</td></tr>`;
+    } else {
+        rowsHtml = filtered.map(s => {
+            const crs = coursesData.find(c => c.id === s.course_id);
+            const cls = coursesData.find(c => c.id === s.class_id);
+            const formatTime = (t) => {
+                if (!t) return ''; let [h, m] = t.split(':'); h = parseInt(h);
+                const ampm = h >= 12 ? 'م' : 'ص'; h = h % 12 || 12; return `${h}:${m} ${ampm}`;
+            };
+            return `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold;">${s.day_of_week}</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;" dir="ltr">${formatTime(s.start_time)} - ${formatTime(s.end_time)}</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">${crs ? crs.title : '-'}</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">${cls ? cls.title : '-'}</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">${s.instructor_name}</td>
+                    <td style="border: 1px solid #ddd; padding: 8px;">${s.room || '-'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    let reportHtml = `
+        <div dir="rtl" style="font-family: 'Cairo', sans-serif; padding: 20px; max-width: 900px; margin: auto;">
+            <div style="text-align: center; border-bottom: 2px solid #333; margin-bottom: 20px; padding-bottom: 10px;">
+                <h2>${settingsData.instituteName || 'المركز التعليمي'}</h2>
+                <h3>الجدول الأسبوعي</h3>
+                <p><strong>الشعبة:</strong> ${classFilter} | <strong>المدرس:</strong> ${instFilter}</p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 14px;">
+                <thead style="background-color: #f3f4f6;">
+                    <tr>
+                        <th style="border: 1px solid #ddd; padding: 8px;">اليوم</th>
+                        <th style="border: 1px solid #ddd; padding: 8px;">الوقت</th>
+                        <th style="border: 1px solid #ddd; padding: 8px;">الدورة</th>
+                        <th style="border: 1px solid #ddd; padding: 8px;">الشعبة</th>
+                        <th style="border: 1px solid #ddd; padding: 8px;">المدرس</th>
+                        <th style="border: 1px solid #ddd; padding: 8px;">القاعة</th>
+                    </tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+            <div style="margin-top: 30px; text-align: left; font-size: 12px; color: #666;">
+                تاريخ الطباعة: ${new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())}
+            </div>
+        </div>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute'; iframe.style.top = '-9999px'; iframe.style.left = '-9999px';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`<html><head><title>طباعة الجدول الأسبوعي</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Public+Sans:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet"><style>body { font-family: 'Public Sans', 'Tajawal', sans-serif; } h1, h2, h3 { font-family: 'Cairo', sans-serif; } @media print { @page { margin: 1cm; } }</style></head><body>${reportHtml}</body></html>`);
+    doc.close();
+    iframe.contentWindow.focus();
+    setTimeout(() => { iframe.contentWindow.print(); document.body.removeChild(iframe); }, 500);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     initChart();
 
+    // Global listener for "GOTO_INSTRUCTORS" option in any select dropdown
+    document.addEventListener('change', (e) => {
+        if (e.target.tagName === 'SELECT' && e.target.value === 'GOTO_INSTRUCTORS') {
+            e.preventDefault();
+            const modal = e.target.closest('.modal-overlay');
+            if (modal) {
+                closeModal(modal.id);
+            }
+            navigateTo('instructors');
+            e.target.value = ''; // Reset select value
+        }
+    });
+
     // Toggle Dropdown
-    const notifBtn = document.getElementById('notif-btn');
+    const notifBtn = document.getElementById('notif-btn'); // تعريف المتغير هنا
     const notifDropdown = document.getElementById('notif-dropdown');
     notifBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -3164,7 +4626,7 @@ document.addEventListener("DOMContentLoaded", () => {
         
         let imgBase64 = "";
 
-        if (fileInput && fileInput.files && fileInput.files[0]) {
+        if (fileInput && fileInput.files && fileInput.files[0]) { // التحقق من وجود ملف قبل القراءة
             const reader = new FileReader();
             reader.onload = async function (event) {
                 imgBase64 = event.target.result;
@@ -3178,18 +4640,19 @@ document.addEventListener("DOMContentLoaded", () => {
         async function saveInstructor() {
             const newInstructor = { id: 'Inst-' + Date.now(), name, spec, phone, img: imgBase64 };
             
-            instructorsData.push(newInstructor);
-            renderInstructors();
-            closeModal('add-instructor-modal');
-            document.getElementById('addInstructorForm').reset();
-
             try {
-                await fetch(`${API_BASE}/update/instructors`, {
-                    method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newInstructor)
-                });
-            } catch (err) { console.error(err); }
+                const res = await fetch('api.php?endpoint=update/instructors', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newInstructor]) });
+                const result = await res.json();
+                if (!result.success) throw new Error(result.message);
+
+                await loadDataFromDB();
+                closeModal('add-instructor-modal');
+                document.getElementById('addInstructorForm').reset();
+                alert('تم إضافة المدرس بنجاح!');
+            } catch (err) {
+                console.error("Error adding instructor:", err);
+                alert("فشل إضافة المدرس.");
+            }
         }
     });
 
@@ -3203,7 +4666,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const duration = document.getElementById('courseDuration').value;
         const fileInput = document.getElementById('courseImg');
 
-        let imgBase64 = "https://via.placeholder.com/300x200";
+        let imgBase64 = "https://placehold.co/300x200";
         if (fileInput.files && fileInput.files[0]) {
             const reader = new FileReader();
             reader.onload = async function (e) {
@@ -3225,19 +4688,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 students: "0",
                 img: imgBase64
             };
-            coursesData.push(newCourse);
-            renderCourses();
-            closeModal('add-course-modal');
-            document.getElementById('addCourseForm').reset();
-
+            
             try {
-                await fetch(`${API_BASE}/update/courses`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newCourse)
-                });
+                const res = await fetch('api.php?endpoint=update/courses', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newCourse]) });
+                const result = await res.json();
+                if (!result.success) throw new Error(result.message);
+
+                await loadDataFromDB();
+                closeModal('add-course-modal');
+                document.getElementById('addCourseForm').reset();
+                alert('تم إضافة الدورة بنجاح!');
             } catch (err) {
-                console.error(err);
+                console.error("Error adding course:", err);
+                alert("فشل إضافة الدورة.");
             }
         }
     });
@@ -3249,24 +4712,65 @@ document.addEventListener("DOMContentLoaded", () => {
         const id = document.getElementById('editClassId').value;
         const title = document.getElementById('editClassName').value;
         const subject = document.getElementById('editClassSubject').value;
+        const instructor = document.getElementById('editClassInstructor').value;
         const capacity = document.getElementById('editClassCapacity').value;
 
-        const updates = { title, subject, capacity };
+        const updates = { title, subject, capacity, instructor };
 
         try {
-            const res = await fetch(`${API_BASE}/courses/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-            if (res.ok) {
+            const res = await fetch(`api.php?endpoint=courses/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+            const result = await res.json();
+            if (result.success) {
                 const index = coursesData.findIndex(c => c.id === id);
                 if (index !== -1) { coursesData[index] = { ...coursesData[index], ...updates }; }
                 if (typeof renderClassManagement === 'function') renderClassManagement();
                 if (typeof renderCourses === 'function') renderCourses();
                 closeModal('edit-class-modal');
-            } else { alert('فشل في التعديل، يرجى التحقق من الخادم.'); }
-        } catch (e) { alert("خطأ في الاتصال بالخادم"); }
+                alert('تم تعديل الشعبة بنجاح!');
+            } else { throw new Error(result.message); }
+        } catch (e) { 
+            console.error("Error editing class:", e);
+            alert("خطأ في الحفظ."); 
+        }
+    });
+
+    // Handle Edit Schedule Form Submission
+    document.getElementById('editScheduleForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const id = document.getElementById('editScheduleId').value;
+        const courseId = document.getElementById('editScheduleCourse').value;
+        const classId = document.getElementById('editScheduleClass').value;
+        const instName = document.getElementById('editScheduleInstructor').value;
+        const room = document.getElementById('editScheduleRoom').value;
+        const start = document.getElementById('editScheduleStartTime').value;
+        const end = document.getElementById('editScheduleEndTime').value;
+        const day = document.getElementById('editScheduleDay').value;
+
+        const updates = { 
+            course_id: courseId, 
+            class_id: classId, 
+            instructor_name: instName, 
+            room: room, 
+            start_time: start, 
+            end_time: end, 
+            day_of_week: day 
+        };
+
+        try {
+            const res = await fetch(`api.php?endpoint=update/schedule`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([{id: id, ...updates}]) });
+            const result = await res.json();
+            if (result.success) {
+                const index = scheduleData.findIndex(s => s.id === id);
+                if (index !== -1) { scheduleData[index] = { ...scheduleData[index], ...updates }; }
+                renderSchedule();
+                closeModal('edit-schedule-modal');
+                alert('تم تعديل الموعد بنجاح!');
+            } else { throw new Error(result.message); }
+        } catch (e) { 
+            console.error("Error editing schedule:", e);
+            alert("خطأ في الحفظ."); 
+        }
     });
 
     // التعامل مع إضافة شعبة جديدة
@@ -3275,38 +4779,37 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const title = document.getElementById('className').value;
         const subject = document.getElementById('classSubject').value;
+        const instructor = document.getElementById('classInstructor').value;
         const capacity = document.getElementById('classCapacity').value;
 
         const newClass = {
             id: 'Crs-' + Date.now(),
             title: title,
             subject: subject,
-            instructor: 'غير محدد',
+            instructor: instructor,
             duration: 'غير محدد',
 
             students: '0',
             capacity: capacity,
-            img: "https://via.placeholder.com/300x200"
+            img: "https://placehold.co/300x200"
         };
 
         coursesData.push(newClass);
         if (typeof renderClassManagement === 'function') renderClassManagement();
         if (typeof renderCourses === 'function') renderCourses();
-        if (typeof renderCourses === 'function') renderCourses(); // Keep it to update courses list if needed
         closeModal('add-class-modal');
         document.getElementById('addClassForm').reset();
 
         try {
-            await fetch(`${API_BASE}/update/courses`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newClass)
-            });
+            const res = await fetch('api.php?endpoint=update/courses', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newClass]) });
+            const result = await res.json();
+            if (!result.success) throw new Error(result.message);
+            
             alert('تم إضافة الشعبة بنجاح!');
         } catch (err) {
-            console.error(err);
+            console.error("Error adding class:", err);
             alert('فشل إضافة الشعبة.');
-            loadDataFromDB()
+            await loadDataFromDB();
         }
     });
 
@@ -3337,13 +4840,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Persist
         try {
-            await fetch(`${API_BASE}/update/subjects`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newSubject)
-            });
+            const res = await fetch('api.php?endpoint=update/subjects', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newSubject]) });
+            const result = await res.json();
+            if (!result.success) throw new Error(result.message);
         } catch (err) {
-            console.error(err);
+            console.error("Error adding subject:", err);
         }
     });
 
@@ -3355,43 +4856,20 @@ document.addEventListener("DOMContentLoaded", () => {
         let target = document.getElementById('notifTarget').value;
         const message = document.getElementById('notifMessage').value;
         
-        if (target === 'شعبة محددة') {
-            const classVal = document.getElementById('notifClass').value;
-            target = 'شعبة: ' + classVal;
-        }
-
         const date = new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date());
 
         const newNotif = { id: 'N-' + Date.now(), title, target, message, date };
 
-        // Optimistic UI update
-        notificationsData.push(newNotif);
-        renderNotifications();
-        e.target.reset();
-        
-        const classGroup = document.getElementById('notifClassGroup');
-        const classSelect = document.getElementById('notifClass');
-        if (classGroup) classGroup.style.display = 'none';
-        if (classSelect) classSelect.required = false;
-
-        // Persist to server
         try {
-            const response = await fetch(`${API_BASE}/update/notifications`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(notificationsData)
-            });
+            const res = await fetch('api.php?endpoint=update/notifications', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newNotif]) });
+            const result = await res.json();
+            if (!result.success) throw new Error(result.message);
 
-            if (!response.ok) {
-                throw new Error('فشل حفظ الإشعار');
-            }
+            await loadDataFromDB();
+            e.target.reset();
             alert('تم إرسال الإشعار بنجاح!');
-
         } catch (error) {
             console.error("Error saving notification:", error);
-            // Revert 
-            notificationsData.pop();
-            renderNotifications();
             alert('حدث خطأ أثناء حفظ الإشعار. يرجى المحاولة مرة أخرى.');
         }
     });
@@ -3409,28 +4887,219 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const newNotif = { id: 'N-' + Date.now(), title, target, message, date };
 
-        // Optimistic UI update
-        notificationsData.push(newNotif);
-        renderNotifications();
-        e.target.reset();
-        
-        // Persist to server
         try {
-            const response = await fetch(`${API_BASE}/update/notifications`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(notificationsData)
-            });
+            const res = await fetch('api.php?endpoint=update/notifications', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newNotif]) });
+            const result = await res.json();
+            if (!result.success) throw new Error(result.message);
 
-            if (!response.ok) throw new Error('فشل حفظ الإشعار');
+            await loadDataFromDB();
+            e.target.reset();
             alert('تم إرسال الإشعار بنجاح إلى طلاب الشعبة المحددة!');
         } catch (error) {
             console.error("Error saving notification:", error);
-            notificationsData.pop();
-            renderNotifications();
             alert('حدث خطأ أثناء حفظ الإشعار. يرجى المحاولة مرة أخرى.');
         }
     });
+    
+    // Handle Schedule Form
+    document.getElementById('addScheduleForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const courseId = document.getElementById('scheduleCourse').value;
+        const classId = document.getElementById('scheduleClass').value;
+        const instName = document.getElementById('scheduleInstructor').value;
+        const day = document.getElementById('scheduleDay').value;
+        const room = document.getElementById('scheduleRoom').value;
+        const start = document.getElementById('scheduleStartTime').value;
+        const end = document.getElementById('scheduleEndTime').value;
+        
+        if (start >= end) {
+            alert('وقت الانتهاء يجب أن يكون بعد وقت البدء.');
+            return;
+        }
+
+        // التحقق من التضارب للمدرس
+        const conflict = scheduleData.find(s => {
+            if (s.instructor_name === instName && s.day_of_week === day && s.instructor_name !== 'غير محدد') {
+                return (start < s.end_time) && (end > s.start_time);
+            }
+            return false;
+        });
+
+        if (conflict) {
+            const cls = coursesData.find(c => c.id === conflict.class_id);
+            alert(`يوجد تضارب! المدرس "${instName}" لديه محاضرة مسجلة في نفس الوقت.\n\nاليوم: ${day}\nالوقت: ${conflict.start_time} - ${conflict.end_time}\nالشعبة: ${cls ? cls.title : '-'}`);
+            return;
+        }
+
+        const newSch = {
+            id: 'Sch-' + Date.now(),
+            course_id: courseId, 
+            class_id: classId, 
+            instructor_name: instName,
+            day_of_week: day, 
+            room: room, 
+            start_time: start, 
+            end_time: end
+        };
+
+        try {
+            const res = await fetch('api.php?endpoint=update/schedule', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newSch]) });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                closeModal('add-schedule-modal');
+                e.target.reset();
+                alert('تم إضافة الموعد بنجاح!');
+            } else { throw new Error(result.message); }
+        } catch (err) {
+            console.error("Error saving schedule:", err);
+            alert('تعذر الحفظ');
+        }
+    });
+
+    // Handle Add Grade Form Submission
+    document.getElementById('addGradeForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const classId = document.getElementById('gradeModalClass').value;
+        const studentId = document.getElementById('gradeModalStudent').value;
+        const examName = document.getElementById('gradeModalExamName').value;
+        const gradeValue = document.getElementById('gradeModalValue').value;
+        const w1 = document.getElementById('gradeModalW1').value;
+        const w2 = document.getElementById('gradeModalW2').value;
+        const w3 = document.getElementById('gradeModalW3').value;
+        const w4 = document.getElementById('gradeModalW4').value;
+        const notes = document.getElementById('gradeModalNotes').value;
+        
+        let gradeId = 'GRD-' + Date.now() + Math.floor(Math.random() * 1000);
+        const existingGrade = gradesData.find(g => g.student_id === studentId && g.class_id === classId);
+        if (existingGrade) gradeId = existingGrade.id;
+        
+        const newGrade = {
+            id: gradeId,
+            class_id: classId,
+            student_id: studentId,
+            exam_name: examName,
+            grade_value: gradeValue,
+            week1: w1,
+            week2: w2,
+            week3: w3,
+            week4: w4,
+            notes: notes
+        };
+        
+        try {
+            const res = await fetch('api.php?endpoint=update/grades', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newGrade]) });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                alert('تم حفظ درجة الطالب بنجاح!');
+                closeModal('add-grade-modal');
+                e.target.reset();
+                loadClassGrades();
+            } else { throw new Error(result.message); }
+        } catch (err) {
+            console.error("Error saving grade:", err);
+            alert('تعذر الحفظ.');
+        }
+    });
+
+    // === معالجة إضافة كتاب للمكتبة ===
+    document.getElementById('addBookForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('bookTitle').value;
+        const author = document.getElementById('bookAuthor').value;
+        const category = document.getElementById('bookCategory').value;
+
+        const newBook = {
+            id: 'LIB-' + Date.now(),
+            title: title,
+            author: author,
+            category: category,
+            status: 'متاح'
+        };
+
+        try {
+            const res = await fetch('api.php?endpoint=update/library', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newBook]) });
+            const result = await res.json();
+            if (result.success) {
+                await loadDataFromDB();
+                closeModal('add-book-modal');
+                e.target.reset();
+                alert('تم إضافة الكتاب بنجاح!');
+            } else { throw new Error(result.message); }
+        } catch (err) {
+            console.error("Error adding book:", err);
+            alert('حدث خطأ أثناء الحفظ.');
+        }
+    });
+
+    // دالة موحدة لمعالجة إعدادات الحساب (المدرس وولي الأمر)
+    async function handleRoleSettingsUpdate(formId, passwordId, imgId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            const newPassword = document.getElementById(passwordId).value;
+            const fileInput = document.getElementById(imgId);
+            
+            let imgBase64 = "";
+            const submitUpdates = async () => {
+                const updates = {};
+                if (newPassword) {
+                    updates.password_hash = newPassword;
+                    updates.plain_password = newPassword;
+                }
+                if (imgBase64) updates.img = imgBase64;
+
+                if (Object.keys(updates).length === 0) {
+                    alert("لم تقم بإدخال أي تعديلات لحفظها.");
+                    return;
+                }
+
+                try {
+                    const res = await fetch(`api.php?endpoint=roles/${encodeURIComponent(currentUser.email)}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(updates) });
+                    const result = await res.json();
+                    
+                    if (result.success) {
+                        alert('تم حفظ التغييرات بنجاح!');
+                        form.reset();
+                        
+                        if (imgBase64) {
+                            currentUser.img = imgBase64;
+                            sessionStorage.setItem("currentUser", JSON.stringify(currentUser));
+                            const profileImg = document.getElementById("sidebar-profile-img");
+                            if (profileImg) profileImg.src = imgBase64;
+                            
+                            // تزامن صورة المدرس مع جدول هيئة التدريس ليراها الإداريون
+                            if (currentUser.role_code === 'teacher') {
+                                const inst = instructorsData.find(i => i.name === currentUser.name);
+                                if (inst) {
+                                    await fetch(`api.php?endpoint=instructors/${inst.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ img: imgBase64 }) });
+                                }
+                            }
+                        }
+                    } else { throw new Error(result.message); }
+                } catch (err) {
+                    console.error("Error updating settings:", err);
+                    alert('تعذر التحديث.');
+                }
+            };
+
+            if (fileInput && fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = async function (event) { imgBase64 = event.target.result; await submitUpdates(); };
+                reader.readAsDataURL(fileInput.files[0]);
+            } else { await submitUpdates(); }
+        });
+    }
+
+    handleRoleSettingsUpdate('teacherSettingsForm', 'teacherNewPassword', 'teacherProfileImg');
+    handleRoleSettingsUpdate('parentSettingsForm', 'parentNewPassword', 'parentProfileImg');
 
     loadDataFromDB(); // Call this to start loading data
 });
@@ -3469,24 +5138,28 @@ function renderSettings() {
     if (!settingsData) return;
     const nameInput = document.getElementById("settingInstituteName");
     const phoneInput = document.getElementById("settingPhone");
+    const emailInput = document.getElementById("settingEmail");
     const currencySelect = document.getElementById("settingCurrency");
 
     if (nameInput) nameInput.value = settingsData.instituteName || '';
     if (phoneInput) phoneInput.value = settingsData.phone || '';
+    if (emailInput) emailInput.value = settingsData.email || '';
     if (currencySelect) currencySelect.value = settingsData.currency || 'IQD';
 }
 
 async function saveSettings(showLoading = false) {
     const instituteName = document.getElementById('settingInstituteName')?.value || 'أكاديمية المعرفة';
     const phone = document.getElementById('settingPhone')?.value || '';
+    const email = document.getElementById('settingEmail')?.value || '';
     const currency = document.getElementById('settingCurrency')?.value || 'IQD';
     const logoFile = document.getElementById('settingLogo')?.files[0];
 
     const newSettings = {
         instituteName: instituteName,
         phone: phone,
+        email: email,
         currency: currency,
-        logo: settingsData.logo // Default to existing logo unless changed
+        logo: settingsData ? settingsData.logo : null
     };
 
     let btn, originalText;
@@ -3500,25 +5173,21 @@ async function saveSettings(showLoading = false) {
 
     const finalizeSave = async () => {
         try {
-            const res = await fetch(`${API_BASE}/update/settings`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newSettings)
-            });
+            const res = await fetch('api.php?endpoint=update/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(newSettings) });
+            const result = await res.json();
 
-            if (res.ok) {
+            if (result.success) {
                 settingsData = newSettings;
                 applyGlobalSettings();
                 if (showLoading && btn) btn.innerHTML = originalText;
-                alert("تم حفظ الإعدادات بنجاح!");
+                if (showLoading) alert("تم حفظ الإعدادات بنجاح!");
             } else {
-                console.error('فشل في حفظ الإعدادات تلقائياً.');
-                if (showLoading && btn) btn.innerHTML = originalText;
-                alert("حدث خطأ أثناء الحفظ.");
+                throw new Error(result.message);
             }
         } catch (err) {
-            console.error("تعذر الاتصال بالخادم لحفظ الإعدادات.");
+            console.error("Error saving settings:", err);
             if (showLoading && btn) btn.innerHTML = originalText;
+            if (showLoading) alert("حدث خطأ أثناء الحفظ.");
         }
     };
 
@@ -3546,6 +5215,24 @@ document.getElementById('settingsForm')?.addEventListener('submit', async (e) =>
     await saveSettings(true);
 });
 
+// === عرض جدول المكتبة ===
+function renderLibrary() {
+    const tbody = document.getElementById("library-table-body");
+    if (!tbody) return;
+    if (libraryData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px;">لا توجد كتب مضافة في المكتبة</td></tr>';
+        return;
+    }
+    tbody.innerHTML = libraryData.map(b => `
+        <tr>
+            <td style="font-weight: bold;">${b.title}</td>
+            <td>${b.author || '-'}</td>
+            <td><span class="badge" style="background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-color);">${b.category || 'غير مصنف'}</span></td>
+            <td><span class="status-badge status-active">${b.status}</span></td>
+        </tr>
+    `).join('');
+}
+
 // ==========================================
 // General Data Persistence (Instructors, Courses, Accounting)
 // ==========================================
@@ -3564,6 +5251,7 @@ document.getElementById('addAccountingForm')?.addEventListener('submit', async (
     
     let statusText = statusVal === 'active' ? 'مدفوع' : (statusVal === 'pending' ? 'مدفوع جزئي' : 'ملغى');
     const newRecord = {
+        id: 'Acc-' + Date.now(),
         receipt,
         student,
         amount,
@@ -3575,21 +5263,458 @@ document.getElementById('addAccountingForm')?.addEventListener('submit', async (
     };
 
     try {
-        const res = await fetch(`${API_BASE}/update/accounting`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newRecord)
-        });
+        const res = await fetch('api.php?endpoint=update/accounting', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify([newRecord]) });
+        const result = await res.json();
 
-        if (res.ok) {
+        if (result.success) {
             await loadDataFromDB();
             closeModal('add-accounting-modal');
             document.getElementById('addAccountingForm').reset();
             alert('تم إضافة السجل المالي بنجاح!');
         } else {
-            alert('فشل في عملية الحفظ.');
+            throw new Error(result.message);
         }
     } catch (err) {
-        alert('تعذر الاتصال بالخادم.');
+        console.error("Error adding accounting:", err);
+        alert('تعذر الحفظ.');
     }
+});
+
+// ==========================================
+// Database Management (Export / Import)
+// ==========================================
+async function exportDatabase() {
+    try {
+        const data = {
+            settings: settingsData,
+            roles: rolesData,
+            subjects: subjectsData,
+            instructors: instructorsData,
+            courses: coursesData,
+            students: studentsData,
+            recentStudents: recentStudentsData,
+            accounting: accountingData,
+            notifications: notificationsData,
+            attendance: attendanceData,
+            schedule: scheduleData,
+            grades: gradesData,
+            library: libraryData
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const date = new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).replace(/\//g, '-');
+        a.href = objectUrl;
+        a.download = `panda_backup_${date}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+        alert("تعذر التصدير: " + e.message);
+    }
+}
+
+function importDatabase(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const importedData = JSON.parse(e.target.result);
+            if (importedData) {
+                if (confirm("تحذير: استعادة النسخة الاحتياطية ستقوم بمسح جميع البيانات الحالية واستبدالها بالبيانات الموجودة في الملف. هل أنت متأكد من الاستمرار؟")) {
+                    const response = await fetch('api.php?endpoint=import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(importedData)
+                    });
+                    const result = await response.json();
+                    
+                    if(result.success) {
+                        alert("تم استعادة قاعدة البيانات بنجاح! سيتم إعادة تحميل النظام لتطبيق التغييرات.");
+                        window.location.reload();
+                    } else {
+                        throw new Error(result.message);
+                    }
+                }
+            } else {
+                alert("ملف قاعدة البيانات غير صالح.");
+            }
+        } catch (err) {
+            alert("خطأ في قراءة أو استيراد الملف: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+// ==========================================
+// Certificate Issuance Logic
+// ==========================================
+function populateCertificateForm() {
+    const certStudent = document.getElementById('certStudent');
+    const certCourse = document.getElementById('certCourse');
+
+    if (certStudent) {
+        let options = '<option value="">-- اختر الطالب --</option>';
+        studentsData.slice(0, 200).forEach(s => {
+            options += `<option value="${s.id}">${s.name}</option>`;
+        });
+        certStudent.innerHTML = options;
+    }
+
+    if (certCourse) {
+        let options = '<option value="">-- اختر الدورة --</option>';
+        const uniqueCourses = [...new Set(studentsData.map(s => s.course).filter(Boolean))];
+        
+        coursesData.forEach(c => {
+            if (!uniqueCourses.includes(c.title)) uniqueCourses.push(c.title);
+        });
+
+        uniqueCourses.forEach(c => {
+            options += `<option value="${c}">${c}</option>`;
+        });
+        certCourse.innerHTML = options;
+    }
+    
+    // Set default date
+    const certDate = document.getElementById('certDate');
+    if (certDate && !certDate.value) {
+        const today = new Date();
+        certDate.value = today.toISOString().split('T')[0];
+    }
+
+    // Generate automatic serial if empty
+    const certSerialInput = document.getElementById('certSerial');
+    if (certSerialInput && !certSerialInput.value) {
+        const currentYear = new Date().getFullYear();
+        // Generate a pseudo-sequential 3-digit number for the serial (e.g., PND-2024-456)
+        certSerialInput.value = `PND-${currentYear}-${String(Math.floor(Math.random() * 900) + 100).padStart(3, '0')}`;
+    }
+    updateCertPreview();
+}
+
+function updateCertPreview() {
+    const studentId = document.getElementById('certStudent')?.value;
+    const course = document.getElementById('certCourse')?.value;
+    const grade = document.getElementById('certGrade')?.value || 'ممتاز';
+    const date = document.getElementById('certDate')?.value;
+    const serial = document.getElementById('certSerial')?.value || 'PND-000';
+
+    let studentName = "اسم الطالب";
+    if (studentId) {
+        const student = studentsData.find(s => s.id === studentId);
+        if (student) studentName = student.name;
+    }
+
+    const nameEl = document.getElementById('cert-preview-name');
+    const courseEl = document.getElementById('cert-preview-course');
+    const gradeEl = document.getElementById('cert-preview-grade');
+    const serialEl = document.getElementById('cert-preview-serial');
+    const dateEl = document.getElementById('cert-preview-date');
+    const instEl = document.getElementById('cert-preview-institute');
+    const contactEl = document.getElementById('cert-preview-contact');
+
+    if (nameEl) nameEl.textContent = studentName;
+    if (courseEl) courseEl.textContent = course || "اسم الدورة التدريبية";
+    if (gradeEl) gradeEl.textContent = grade;
+    if (serialEl) serialEl.textContent = serial;
+    
+    if (dateEl && date) {
+        dateEl.textContent = new Date(date).toLocaleDateString('ar-EG');
+    }
+
+    if (instEl) {
+        instEl.textContent = settingsData.instituteName || "مركز الباندا";
+    }
+    if (contactEl) {
+        const phone = settingsData.phone || "07700000000";
+        const email = settingsData.email || "info@panda.com";
+        contactEl.textContent = `هاتف: ${phone} | بريد: ${email}`;
+    }
+}
+
+function printCertificate() {
+    const studentId = document.getElementById('certStudent')?.value;
+    const course = document.getElementById('certCourse')?.value;
+    const grade = document.getElementById('certGrade')?.value || 'ممتاز';
+    const date = document.getElementById('certDate')?.value;
+    const serial = document.getElementById('certSerial')?.value || 'PND-000';
+
+    if (!studentId || !course) {
+        alert("يرجى اختيار الطالب والدورة قبل الطباعة.");
+        return;
+    }
+
+    let studentName = "اسم الطالب";
+    const student = studentsData.find(s => s.id === studentId);
+    if (student) studentName = student.name;
+
+    const instituteName = settingsData.instituteName || "المركز الباندا";
+    const phone = settingsData.phone || "07801986408";
+    const email = settingsData.email || "alpanda.smw@gmail.com";
+    const logoSrc = settingsData.logo || "";
+    
+    const printWindow = window.open('', '_blank');
+    
+    if (!printWindow) {
+        alert("يرجى السماح بالنوافذ المنبثقة (Pop-ups) لطباعة الشهادة.");
+        return;
+    }
+
+    const baseUrl = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
+
+    const certContent = `
+        <div class="certificate-wrapper">
+            <div class="cert-outer-border">
+                <div class="cert-inner-border">
+                    <div class="corner corner-tl"></div>
+                    <div class="corner corner-tr"></div>
+                    <div class="corner corner-bl"></div>
+                    <div class="corner corner-br"></div>
+
+                    <div class="cert-header">
+                        <div class="header-left">
+                            ${logoSrc ? '<img src="' + logoSrc + '" class="cert-logo" alt="Logo">' : '<div class="logo-placeholder">شعار المركز</div>'}
+                        </div>
+                        <div class="header-center">
+                            <h1 class="institute-name">${instituteName}</h1>
+                            <h2 class="cert-title">شهادة إتمام دورة التدريبية</h2>
+                            <div class="cert-subtitle">Certificate of Completion</div>
+                        </div>
+                        <div class="header-right">
+                            <div class="cert-meta-top">
+                                <div><strong>رقم الإصدار:</strong> <span dir="ltr">${serial}</span></div>
+                                <div><strong>تاريخ الإصدار:</strong> ${date ? new Date(date).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="cert-body">
+                        <p class="cert-text">يشهد المركز بأن المتدرب(ة) / This is to certify that</p>
+                        <div class="cert-name">${studentName}</div>
+                        <p class="cert-text">قد اجتاز(ت) بنجاح الدورة التدريبية / has successfully completed the training course</p>
+                        <div class="cert-course">${course}</div>
+                        <p class="cert-text" style="margin-top: 15px;">بتقدير عام / with grade: <strong class="cert-grade">${grade}</strong></p>
+                    </div>
+
+                    <div class="cert-footer">
+                        <div class="footer-block">
+                            <div class="contact-info">
+                                هاتف: <span dir="ltr">${phone}</span><br>
+                                بريد: <span dir="ltr">${email}</span>
+                            </div>
+                        </div>
+                        <div class="footer-block stamp-block">
+                            <div class="stamp-circle">
+                                <div class="stamp-inner">ختم<br>المركز</div>
+                            </div>
+                        </div>
+                        <div class="footer-block sig-block">
+                            <div class="sig-line"></div>
+                            <div class="sig-text">توقيع الإدارة<br>Authorized Signature</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>طباعة الشهادة</title>
+            <base href="${baseUrl}">
+            <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+            <style>
+                :root {
+                    --primary: #1e3a8a;
+                    --gold: #b8860b;
+                    --gold-light: #d4af37;
+                    --text: #1f2937;
+                }
+                * {
+                    box-sizing: border-box;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                }
+                @page {
+                    size: A4 landscape;
+                    margin: 0;
+                }
+                body {
+                    margin: 0;
+                    padding: 0;
+                    background-color: #fff;
+                    font-family: 'Public Sans', 'Tajawal', sans-serif;
+                }
+                .certificate-wrapper {
+                    width: 100vw;
+                    height: 100vh;
+                    padding: 40px;
+                    box-sizing: border-box;
+                    background: #fff;
+                }
+                .cert-outer-border {
+                    border: 4px solid var(--primary);
+                    padding: 6px;
+                    height: 100%;
+                    box-sizing: border-box;
+                }
+                .cert-inner-border {
+                    border: 1px solid var(--gold-light);
+                    height: 100%;
+                    box-sizing: border-box;
+                    position: relative;
+                    padding: 30px;
+                    display: flex;
+                    flex-direction: column;
+                    background: linear-gradient(135deg, rgba(243,244,246,0.4) 0%, rgba(255,255,255,1) 50%, rgba(243,244,246,0.4) 100%);
+                }
+                
+                /* Corners */
+                .corner { position: absolute; width: 40px; height: 40px; border: 3px solid var(--gold); }
+                .corner-tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
+                .corner-tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
+                .corner-bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
+                .corner-br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+
+                /* Header */
+                .cert-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    margin-bottom: 10px;
+                }
+                .header-left, .header-right { width: 25%; }
+                .header-center { width: 50%; text-align: center; }
+                
+                .cert-logo { max-height: 80px; max-width: 150px; object-fit: contain; }
+                .logo-placeholder { width: 80px; height: 80px; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #999; margin: 0 auto; }
+                
+                .institute-name { font-family: 'Amiri', serif; font-size: 26px; color: var(--gold); margin: 0 0 5px; }
+                .cert-title {
+                    margin: 0;
+                    font-size: 28px;
+                    color: var(--primary);
+                    font-weight: 800;
+                    font-family: 'Cairo', sans-serif;
+                }
+                .cert-subtitle {
+                    font-size: 14px;
+                    color: #6b7280;
+                    letter-spacing: 2px;
+                    text-transform: uppercase;
+                    margin-top: 5px;
+                }
+                
+                .cert-meta-top { font-size: 13px; color: var(--text); line-height: 1.8; text-align: left; }
+                
+                /* Body */
+                .cert-body {
+                    flex-grow: 1;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    text-align: center;
+                }
+                .cert-text {
+                    font-size: 18px;
+                    color: #4b5563;
+                    margin: 10px 0;
+                }
+                .cert-name {
+                    font-size: 42px;
+                    font-weight: 800;
+                    color: var(--primary);
+                    font-family: 'Amiri', serif;
+                    border-bottom: 2px solid var(--gold);
+                    padding: 0 40px 10px;
+                    margin: 10px 0 20px;
+                    min-width: 60%;
+                }
+                .cert-course {
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: var(--text);
+                    margin: 5px 0;
+                    padding: 10px 30px;
+                    background: rgba(30, 58, 138, 0.05);
+                    border-radius: 50px;
+                    border: 1px solid rgba(30, 58, 138, 0.1);
+                }
+                .cert-grade { color: var(--gold); font-size: 24px; margin: 0 5px; }
+
+                /* Footer */
+                .cert-footer {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-end;
+                    margin-top: 20px;
+                    padding: 0 20px;
+                }
+                .footer-block { width: 30%; }
+                .contact-info { font-size: 12px; color: #6b7280; line-height: 1.6; text-align: right; }
+                
+                .stamp-block { display: flex; justify-content: center; align-items: center; }
+                .stamp-circle {
+                    width: 100px;
+                    height: 100px;
+                    border: 3px solid rgba(184, 134, 11, 0.5);
+                    border-radius: 50%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    box-shadow: 0 0 15px rgba(184, 134, 11, 0.1);
+                }
+                .stamp-inner {
+                    width: 84px;
+                    height: 84px;
+                    border: 1px dashed rgba(184, 134, 11, 0.8);
+                    border-radius: 50%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    text-align: center;
+                    color: rgba(184, 134, 11, 0.8);
+                    font-weight: 800;
+                    font-size: 16px;
+                    transform: rotate(-10deg);
+                }
+                
+                .sig-block { text-align: center; }
+                .sig-line { width: 80%; margin: 0 auto 10px; border-bottom: 2px solid var(--text); }
+                .sig-text { font-size: 14px; color: var(--text); line-height: 1.4; }
+            </style>
+        </head>
+        <body>
+            ${certContent}
+            <script>
+                window.onload = function() {
+                    setTimeout(() => {
+                        window.print();
+                        window.onafterprint = function() {
+                            window.close();
+                        };
+                    }, 500);
+                };
+            </script>
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
+
+// Hook into navigation clicks to refresh certificate form
+document.addEventListener("DOMContentLoaded", () => {
+    document.body.addEventListener('click', (e) => {
+        const link = e.target.closest('.nav-links a');
+        if (link && link.getAttribute('data-target') === 'certificates') {
+            setTimeout(populateCertificateForm, 100);
+        }
+    });
 });
